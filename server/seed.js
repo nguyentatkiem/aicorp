@@ -118,6 +118,50 @@ function seed() {
   CONNECTIONS.forEach(([id, kind, name, cfg, en, st]) => insConn.run(id, kind, name, JSON.stringify(cfg), en, st));
 }
 
+/* Nạp/cập nhật skill từ server/skills-seed/*.md (chạy mỗi lần boot — thêm skill mới không cần reset DB) */
+function syncSkillsFromSeedDir() {
+  const seedDir = path.join(__dirname, 'skills-seed');
+  if (!fs.existsSync(seedDir)) return 0;
+  let n = 0;
+  for (const f of fs.readdirSync(seedDir).filter(x => x.endsWith('.md'))) {
+    try {
+      const raw = fs.readFileSync(path.join(seedDir, f), 'utf8');
+      const fm = parseFrontmatter(raw);
+      if (!fm.name) continue;
+      const slug = fm.name.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const dir = path.join(DIRS.skills, slug);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'SKILL.md'), raw);
+      const agents = (fm.agents || '').split(',').map(s => s.trim()).filter(Boolean);
+      db.prepare(`INSERT INTO skills(id,name,path,description,assigned_agents_json,enabled) VALUES(?,?,?,?,?,1)
+        ON CONFLICT(id) DO UPDATE SET path=excluded.path, description=excluded.description, assigned_agents_json=excluded.assigned_agents_json`)
+        .run(slug, slug, dir, (fm.description || '').slice(0, 200), JSON.stringify(agents));
+      for (const aid of agents) {
+        const row = db.prepare('SELECT skills_json FROM agents WHERE id=?').get(aid);
+        if (!row) continue;
+        const cur = JSON.parse(row.skills_json || '[]');
+        if (!cur.includes(slug)) {
+          cur.push(slug);
+          db.prepare('UPDATE agents SET skills_json=? WHERE id=?').run(JSON.stringify(cur), aid);
+        }
+      }
+      n++;
+    } catch (e) { /* bỏ qua file lỗi */ }
+  }
+  return n;
+}
+
+function parseFrontmatter(raw) {
+  const m = raw.match(/^---\n([\s\S]*?)\n---/);
+  const out = {};
+  if (!m) return out;
+  for (const line of m[1].split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return out;
+}
+
 function seedSettings() {
   const defaults = {
     engine_kind: 'demo',                       // demo | api | sub
@@ -139,4 +183,4 @@ function seedSettings() {
   });
 }
 
-module.exports = { seed, seedSettings };
+module.exports = { seed, seedSettings, syncSkillsFromSeedDir };

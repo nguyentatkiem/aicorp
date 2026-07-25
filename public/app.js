@@ -93,7 +93,27 @@ function addLine(a, b, pts) {
   const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   p.setAttribute('d', pathVia(pts));
   svg().appendChild(p);
+  // vùng bấm rộng vô hình — bấm đường nối xem lần bàn giao gần nhất (đặc tả 7.4)
+  const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  hit.setAttribute('d', pathVia(pts));
+  // inline style để thắng CSS '#orgsvg path' (CSS đè presentation attribute)
+  hit.style.stroke = 'transparent';
+  hit.style.strokeWidth = '12';
+  hit.style.fill = 'none';
+  hit.style.filter = 'none';
+  hit.style.pointerEvents = 'stroke';
+  hit.style.cursor = 'pointer';
+  hit.addEventListener('click', e => { e.stopPropagation(); showHandoff(a, b); });
+  svg().appendChild(hit);
   LINES[a + '>' + b] = { el: p, pts };
+}
+
+/* Bấm đường nối → chi tiết lần bàn giao gần nhất giữa 2 agent */
+async function showHandoff(a, b) {
+  const tasks = await api('/tasks');
+  const t = tasks.find(x => [x.assignee_id, x.reviewer_id].includes(b) || [x.assignee_id, x.reviewer_id].includes(a));
+  if (t) showTaskDetail(t.id);
+  else toast('🔗 Chưa có bàn giao', 'Đường nối này chưa có lần giao việc nào trong các nhiệm vụ gần đây', 'amber');
 }
 function drawLines(depts) {
   addLine('ceo', 'coo', [bottomOf('ceo'), topOf('coo')]);
@@ -219,7 +239,15 @@ function cooTyping(on) {
 async function loadChats() {
   const rows = await api('/chats');
   $('#msgs').innerHTML = '';
-  if (!rows.length) chatMsg('coo', `Chào sếp! Em là AI COO của <b>${esc(STATE.company.name)}</b>. Sếp giao nhiệm vụ đầu tiên ở ô bên dưới nhé — ví dụ: <i>"Viết 3 bài Facebook giới thiệu sản phẩm chủ lực"</i> 💪`);
+  if (!rows.length) {
+    const sg = await api('/suggestions').catch(() => null);
+    const chips = sg && sg.suggestions ? sg.suggestions.map(s =>
+      `<span class="filelink sugchip" data-sug="${esc(s)}">💡 ${esc(s)}</span>`).join('') : '';
+    const m = chatMsg('coo', `Chào sếp! Em là AI COO của <b>${esc(STATE.company.name)}</b>. Cả công ty đã sẵn sàng — sếp giao nhiệm vụ đầu tiên nhé. Em gợi ý 3 việc hợp ngành mình:<br>${chips}`);
+    m.querySelectorAll('.sugchip').forEach(c => c.addEventListener('click', () => {
+      $('#ceoinput').value = c.dataset.sug; $('#ceoinput').focus();
+    }));
+  }
   rows.forEach(r => chatMsg(r.role, r.html));
 }
 async function sendCEO() {
@@ -233,7 +261,7 @@ async function sendCEO() {
 async function refreshMission() { activeMission = await api('/missions/active'); }
 function showMission() {
   currentDetail = null;
-  $('#detailtitle').innerHTML = '🎯 Nhiệm vụ đang chạy';
+  $('#detailtitle').innerHTML = `🎯 Nhiệm vụ đang chạy <button style="margin-left:auto;color:var(--muted);font-size:11px" onclick="showMissionHistory()">📜 Lịch sử</button>`;
   const m = activeMission;
   const stMap = { briefing: 'Đang hỏi lại CEO', planning: 'Đang lập kế hoạch', running: 'Đang chạy', waiting_approval: 'Chờ CEO duyệt', reporting: 'Đang viết báo cáo', done: '✅ Hoàn thành', failed: '❌ Lỗi', over_budget: '⛔ Chạm trần chi phí', paused: '⏸ Tạm dừng' };
   const feedHtml = feed.slice(-12).reverse().map(f => `<div class="ln">[${f.time}] ${f.ava} <b style="color:var(--text)">${esc(f.who)}</b>: ${esc(f.text)}</div>`).join('') || '<div class="ln">Chưa có hoạt động…</div>';
@@ -285,7 +313,15 @@ function showAgent(id) {
    <div class="dp-card"><h4>Nhật ký suy nghĩ (live)</h4>
      <div class="livelog">${a.logs.slice(-14).reverse().map(l => `<div class="ln ${l.cls}">[${l.time}] ${esc(l.text)}</div>`).join('') || '<div class="ln">Chưa có hoạt động trong phiên này.</div>'}</div>
    </div>
-   ${info.skills && info.skills.length ? `<div class="dp-card"><h4>Skill được gắn</h4>${info.skills.map(s => `<span class="chip">🧩 ${esc(s)}</span>`).join('')}</div>` : ''}`;
+   ${info.skills && info.skills.length ? `<div class="dp-card"><h4>Skill được gắn</h4>${info.skills.map(s => `<span class="chip">🧩 ${esc(s)}</span>`).join('')}</div>` : ''}
+   ${id !== 'ceo' ? `<div class="dp-card"><h4>Thao tác của CEO</h4>
+     <div class="dp-actions">
+       <button onclick="openDM('${id}')">💬 Nhắn riêng</button>
+       <button onclick="switchScreen('factory')">📁 Xem file</button>
+       <button onclick="openAgentEdit('${id}')">✏️ Sửa kỹ năng</button>
+       ${id !== 'coo' ? `<button style="color:var(--red);border-color:var(--red)" onclick="toggleAgentEnabled('${id}')">⏸ Tạm dừng</button>` : ''}
+     </div>
+   </div>` : ''}`;
 }
 
 /* ================= KANBAN + TIMELINE ================= */
@@ -307,7 +343,7 @@ function renderKanban() {
     const cards = TASKS.filter(t => COLMAP[t.status] === c.id);
     return `<div class="kcol"><div class="kh">${c.name}<span class="cnt">${cards.length}</span></div>
      <div class="kbody">${cards.map(t => `
-      <div class="kcard ${['doing', 'reviewing'].includes(t.status) ? 'hot' : ''}">
+      <div class="kcard ${['doing', 'reviewing'].includes(t.status) ? 'hot' : ''}" onclick="showTaskDetail('${t.id}')">
         <div class="kt">${t.status === 'failed' ? '⚠️ ' : ''}${esc(t.title)}</div>
         <div class="km"><span class="kdept" style="background:${deptOf(t.dept_id).color}22;color:${deptOf(t.dept_id).color}">${esc(deptOf(t.dept_id).name.replace('P. ', ''))}</span>
         ${t.score ? `<span class="kscore">${t.score}/100</span>` : ''}
@@ -317,17 +353,24 @@ function renderKanban() {
   }).join('');
 }
 function renderTimeline() {
-  if (!activeMission) { $('#timeline').innerHTML = '<div class="tl-sub">Chưa có nhiệm vụ.</div>'; return; }
+  if (!activeMission || !TASKS.length) { $('#timeline').innerHTML = '<div class="tl-sub" style="padding:20px">Chưa có nhiệm vụ.</div>'; return; }
+  // Trục thời gian THẬT: từ lúc mission bắt đầu đến max(done_at, bây giờ)
   const stProg = { todo: 0, doing: 45, submitted: 70, reviewing: 80, rejected: 45, waiting_approval: 90, done: 100, failed: 100 };
+  const t0 = new Date(activeMission.created_at).getTime();
+  const tEnd = Math.max(Date.now(), ...TASKS.map(t => t.done_at ? new Date(t.done_at).getTime() : 0)) + 1000;
+  const span = Math.max(tEnd - t0, 60000);
+  const fmtDur = ms => ms < 90000 ? Math.round(ms / 1000) + 's' : Math.round(ms / 60000) + ' phút';
   $('#timeline').innerHTML = `<div class="tl-mission">🎯 ${esc(activeMission.title)}</div>
-   <div class="tl-sub">${TASKS.length} đầu việc · bắt đầu ${new Date(activeMission.created_at).toLocaleString('vi-VN')}</div>
-   <div class="tl-grid">` + TASKS.map((t, i) => {
+   <div class="tl-sub">${TASKS.length} đầu việc · bắt đầu ${new Date(activeMission.created_at).toLocaleString('vi-VN')} · tổng ${fmtDur(span)}</div>
+   <div class="tl-grid">` + TASKS.map(t => {
     const d = deptOf(t.dept_id), prog = stProg[t.status] || 0;
-    const start = Math.min(i * 8, 40), w = 30 + (i % 3) * 8;
-    return `<div class="tl-row"><div class="tl-label">${esc(t.title)}</div>
-    <div class="tl-track"><div class="tl-bar" style="left:${start}%;width:${w}%;background:${d.color}26;border:1px solid ${d.color}88;color:${d.color}">
+    const s = Math.max(0, (new Date(t.created_at).getTime() - t0) / span * 100);
+    const e = ((t.done_at ? new Date(t.done_at).getTime() : tEnd) - t0) / span * 100;
+    const w = Math.max(e - s, 6);
+    return `<div class="tl-row"><div class="tl-label" title="${esc(t.title)}">${esc(t.title)}</div>
+    <div class="tl-track" onclick="showTaskDetail('${t.id}')" style="cursor:pointer"><div class="tl-bar" style="left:${s}%;width:${Math.min(w, 100 - s)}%;background:${d.color}26;border:1px solid ${d.color}88;color:${d.color}">
       <div style="position:absolute;inset:0;width:${prog}%;background:${d.color}33;border-radius:5px"></div>
-      <span style="position:relative">${prog}%</span></div></div></div>`;
+      <span style="position:relative">${t.status === 'done' ? '✅ ' : ''}${prog}%${t.score ? ' · ' + t.score + 'đ' : ''}</span></div></div></div>`;
   }).join('') + '</div>';
 }
 function updateMissionBar() {
@@ -372,6 +415,7 @@ async function refreshApprovals() {
          const cls = o.key === 'approve' || o.key === 'accept' ? 'jade' : (o.key === 'reject' || o.key === 'drop' ? 'danger' : 'ghost');
          return `<button class="btn ${cls}" onclick="decide('${r.id}','${o.key}')">${esc(o.label)}</button>`;
        }).join('')}
+       ${r.type === 'real_action' ? `<button class="btn ghost" onclick="openApprovalEdit('${r.id}','${r.task_id}')">✏️ Sửa rồi duyệt</button>` : ''}
      </div>
    </div>`).join('')
     : '<div class="card" style="color:var(--muted)">✨ Không có việc nào chờ duyệt. Khi agent muốn đăng bài/gửi mail/chi tiền, thẻ phê duyệt sẽ xuất hiện ở đây.</div>';
@@ -391,18 +435,24 @@ async function refreshHR() {
   const lvName = { coo: 'Opus', tp: 'Sonnet', nv: 'Haiku' };
   const lvColor = { coo: 'var(--amber)', tp: 'var(--amber)', nv: 'var(--cyan)' };
   $('#hrtbl').innerHTML = `<table class="tbl">
-   <tr><th>Agent</th><th>Phòng</th><th>Model</th><th>Task xong</th><th>Điểm TB</th><th>Tỷ lệ bị trả lại</th><th>Trạng thái</th></tr>` +
+   <tr><th>Agent</th><th>Phòng</th><th>Model</th><th>Task xong</th><th>Điểm TB</th><th>Tỷ lệ bị trả lại</th><th>Trạng thái</th><th>Thao tác</th></tr>` +
     rows.map(a => {
       const st = AGENTS[a.id] ? AGENTS[a.id].state : 'idle';
       const stTxt = { idle: '😴 Nghỉ', think: '<span class="dot live"></span> Đang suy nghĩ', work: '<span class="dot live"></span> Đang làm', review: '<span class="dot amber"></span> Đang review', wait: '🔔 Chờ CEO', done: '✅ Vừa xong' }[st];
       const rr = Math.round((a.rejected_rate || 0) * 100);
-      return `<tr><td>${a.ava} <b>${esc(a.name)}</b> — ${esc(a.role)}</td><td>${esc(a.dept)}</td>
+      return `<tr><td style="cursor:pointer" onclick="showAgentOrOpen('${a.id}')">${a.ava} <b>${esc(a.name)}</b> — ${esc(a.role)}</td><td>${esc(a.dept)}</td>
       <td><span class="ftag" style="background:rgba(246,168,33,.12);color:${lvColor[a.level] || 'var(--cyan)'}">${lvName[a.level] || a.level}</span></td>
       <td>${a.tasks_done}</td>
       <td style="font-family:'JetBrains Mono',monospace;color:var(--jade)">${a.avg_score ? a.avg_score.toFixed(1) : '—'}</td>
-      <td>${rr > 15 ? rr + '% ⚠️' : (rr ? rr + '%' : '—')}</td><td>${stTxt}</td></tr>`;
+      <td>${rr > 15 ? rr + '% ⚠️' : (rr ? rr + '%' : '—')}</td><td>${stTxt}</td>
+      <td style="white-space:nowrap">
+        ${a.id !== 'coo' ? `<button class="btn ghost" style="padding:4px 9px;font-size:11px" onclick="openAgentEdit('${a.id}')">✏️</button>` : ''}
+        ${rr > 15 && a.id !== 'coo' ? `<button class="btn ghost" style="padding:4px 9px;font-size:11px;color:var(--amber);border-color:var(--amber)" onclick="openAgentEdit('${a.id}', true)">🎓 Đào tạo lại</button>` : ''}
+        ${a.id !== 'coo' ? `<button class="btn ghost" style="padding:4px 9px;font-size:11px" onclick="openDM('${a.id}')">💬</button>` : ''}
+      </td></tr>`;
     }).join('') + '</table>';
 }
+window.showAgentOrOpen = id => { if (AGENTS[id]) { switchScreen('home'); showAgent(id); focusNode(id); } };
 
 /* ================= BRAIN ================= */
 async function refreshBrain() {
@@ -440,14 +490,23 @@ async function refreshConnect() {
      <small>Gói Sub Claude (Pro/Max) qua Agent SDK: sắp ra mắt ở v1</small></div>`;
   const conns = await api('/connections');
   $('#connlist').innerHTML = conns.map(c => `
-   <div class="setrow"><div class="sl"><b>${esc(c.name)}</b><span>${esc(c.config?.note || '')}</span></div>
+   <div class="setrow"><div class="sl"><b>${esc(c.name)}</b><span>${esc(c.config?.note || '')}${c.id === 'n8n_webhook' && c.config?.url ? ` · <span style="color:var(--jade)">${esc(c.config.url.slice(0, 40))}</span>` : ''}</span></div>
+   ${c.id === 'n8n_webhook' ? `<button class="btn ghost n8nbtn" style="padding:4px 10px;font-size:11px" data-url="${esc(c.config?.url || '')}">⚙ URL</button>` : ''}
    <div class="toggle ${c.enabled ? 'on' : ''}" onclick="toggleConn('${c.id}',this)"></div></div>`).join('');
+  document.querySelectorAll('.n8nbtn').forEach(b => b.onclick = () => editN8nUrl(b.dataset.url));
   const skills = await api('/skills');
   $('#skilllist').innerHTML = skills.map(s => `
    <div class="setrow"><div class="sl"><b>🧩 ${esc(s.name)}</b><span>Gắn cho: ${(s.assigned || []).join(', ') || '—'} · ${esc(s.description || '')}</span></div>
    <div class="toggle ${s.enabled ? 'on' : ''}" onclick="toggleSkill('${s.id}',this)"></div></div>`).join('');
 }
 window.setEngine = async k => { await post('/settings', { engine_kind: k }); STATE.engine.kind = k; $('#enginename').textContent = k === 'api' ? 'Claude API' : 'Demo'; refreshConnect(); toast('⚡ Đã đổi engine', k === 'api' ? 'Claude API — chạy thật' : 'Demo — chạy thử miễn phí'); };
+window.editN8nUrl = async cur => {
+  const u = prompt('URL webhook n8n (để trống để xóa):', cur || '');
+  if (u === null) return;
+  const r = await fetch('/api/connections/n8n_webhook', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: u.trim() }) }).then(x => x.json());
+  if (r.ok) { toast('🔄 Đã lưu URL n8n', u.trim() || '(đã xóa)'); refreshConnect(); }
+  else toast('⚠️', r.error || 'Lỗi', 'red');
+};
 window.toggleConn = async (id, elx) => { const r = await post(`/connections/${id}/toggle`); elx.classList.toggle('on', !!r.enabled); };
 window.toggleSkill = async (id, elx) => { await post(`/skills/${id}/toggle`); elx.classList.toggle('on'); };
 
@@ -468,6 +527,7 @@ async function loadSettings() {
   $('#set_usdvnd').value = s.usd_vnd;
   $('#keystatus').textContent = s.hasKey ? '✅ Đã lưu key (nhập key mới để thay)' : 'Chưa có key';
   $('#usedtoday').textContent = `Đã dùng hôm nay: ${vnd(STATE.todayVnd)}`;
+  renderCrons();
 }
 async function saveSettings() {
   const body = {
@@ -492,7 +552,8 @@ async function saveSettings() {
 
 /* ================= TOAST / FLY ================= */
 function toast(title, body, cls) {
-  const t = el(`<div class="toast ${cls || ''}"><b>${title}</b><span style="color:var(--muted)">${body}</span></div>`);
+  // escape title/body — chúng có thể chứa tên task/agent do LLM/người dùng sinh (chống XSS)
+  const t = el(`<div class="toast ${cls || ''}"><b>${esc(title)}</b><span style="color:var(--muted)">${esc(body)}</span></div>`);
   $('#toasts').appendChild(t);
   setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .4s'; setTimeout(() => t.remove(), 400); }, 4600);
 }
@@ -529,7 +590,11 @@ function connectSocket() {
   socket.on('task.update', () => { debounce('tasks', refreshTasks, 400); });
   socket.on('mission.update', d => { debounce('mission', async () => { await refreshMission(); if (currentDetail === null) showMission(); updateMissionBar(); refreshStats(); }, 300); });
   socket.on('artifact.new', d => { flyFile(d.agentId, d.icon); debounce('factory', refreshFactory, 500); });
-  socket.on('approval.new', d => { refreshApprovals(); refreshStats(); showApprovalModal(d); });
+  socket.on('approval.new', d => {
+    refreshApprovals(); refreshStats();
+    // không đè modal CEO đang mở (đang soạn DM / sửa nội dung…) — chỉ nhắc bằng toast
+    if (!$('#modalwrap').classList.contains('show')) showApprovalModal(d);
+  });
   socket.on('approval.update', () => { refreshApprovals(); refreshStats(); });
   socket.on('cost.update', d => {
     $('#costtoday').textContent = vnd(d.todayVnd);
@@ -540,6 +605,10 @@ function connectSocket() {
   socket.on('chat.message', d => { cooTyping(false); chatMsg(d.role, d.html); });
   socket.on('chat.typing', d => cooTyping(d.on));
   socket.on('toast', d => toast(d.title, d.body, d.cls));
+  socket.on('org.update', async () => {
+    ORG = await api('/org'); buildOrg(); applyView(false);
+    if ($('#screen-hr').classList.contains('active')) refreshHR();
+  });
 }
 const debTimers = {};
 function debounce(key, fn, ms) { clearTimeout(debTimers[key]); debTimers[key] = setTimeout(fn, ms); }
@@ -557,6 +626,7 @@ async function showApprovalModal(d) {
        const cls = o.key === 'approve' || o.key === 'accept' ? 'jade' : (o.key === 'reject' || o.key === 'drop' ? 'danger' : 'ghost');
        return `<button class="btn ${cls}" onclick="modalDecide('${r.id}','${o.key}')">${esc(o.label)}</button>`;
      }).join('')}
+     ${r.type === 'real_action' ? `<button class="btn ghost" onclick="openApprovalEdit('${r.id}','${r.task_id}')">✏️ Sửa rồi duyệt</button>` : ''}
      <button class="btn ghost" onclick="closeModal();toast('📥 Đã chuyển vào Hộp phê duyệt','Sếp quyết sau — các nhánh khác vẫn chạy','amber')">Để trong Hộp phê duyệt</button>
    </div>`;
   $('#modalwrap').classList.add('show');
@@ -565,6 +635,216 @@ window.closeModal = () => $('#modalwrap').classList.remove('show');
 window.modalDecide = async (id, key) => { closeModal(); await window.decide(id, key); };
 $('#modalwrap').addEventListener('click', e => { if (e.target.id === 'modalwrap') closeModal(); });
 
+/* ================= MODAL CHUNG ================= */
+function openModal(html) { $('#modal').innerHTML = html; $('#modalwrap').classList.add('show'); }
+
+/* ---------- Chi tiết task (bấm thẻ kanban / thanh timeline) ---------- */
+window.showTaskDetail = async id => {
+  const t = await api(`/tasks/${id}/detail`);
+  if (t.error) return toast('⚠️', t.error, 'red');
+  const d = deptOf(t.dept_id);
+  const stMap = { todo: '⏳ Chờ làm', doing: '⚡ Đang làm', submitted: '📤 Đã nộp', reviewing: '🔍 Đang review', rejected: '↩️ Bị trả lại', waiting_approval: '🔔 Chờ CEO', done: '✅ Hoàn thành', failed: '❌ Hủy' };
+  openModal(`
+   <div style="font-weight:800;font-size:15px">${esc(t.title)}</div>
+   <div style="font-size:11.5px;color:var(--muted);margin:6px 0 12px">
+     <span class="ftag" style="background:${d.color}22;color:${d.color}">${esc(d.name)}</span>
+     ${t.assignee_ava || ''} ${esc(t.assignee_name || '')} · review bởi ${esc(t.reviewer_name || '')} · ${stMap[t.status] || t.status}
+     ${t.score ? ` · <b style="color:var(--jade)">${t.score}/100</b>` : ''}
+   </div>
+   ${t.brief ? `<div class="dp-card" style="margin-bottom:10px"><h4>Brief giao việc</h4>
+     <div style="font-size:12px;line-height:1.6"><b>Mục tiêu:</b> ${esc(t.brief.muc_tieu || '')}<br>
+     <b>Định dạng:</b> ${esc(t.brief.format_dau_ra || '')} · <b>Tiêu chí chấm:</b> ${(t.brief.tieu_chi_cham || []).map(esc).join(' · ')}</div></div>` : ''}
+   ${t.reviews.length ? `<div class="dp-card" style="margin-bottom:10px"><h4>Các vòng review</h4>
+     ${t.reviews.map(r => `<div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--line)">
+       <b style="color:${r.pass ? 'var(--jade)' : 'var(--red)'}">Vòng ${r.round}: ${r.score}/100 ${r.pass ? '✔ Đạt' : '✘ Trả lại'}</b><br>
+       <span style="color:var(--muted)">${esc(r.feedback || '')}</span></div>`).join('')}</div>` : ''}
+   ${t.output ? `<div class="preview-box" style="max-height:220px">${esc(t.output.slice(0, 2500))}${t.output.length > 2500 ? '…' : ''}</div>` : ''}
+   ${t.artifacts.length ? `<div style="margin-bottom:12px">${t.artifacts.map(a => `<span class="filelink" onclick="window.open('/api/artifacts/${a.id}/file')">${a.icon} ${esc(a.name)} (v${a.version})</span>`).join('')}</div>` : ''}
+   <button class="btn ghost" onclick="closeModal()">Đóng</button>`);
+};
+
+/* ---------- Lịch sử nhiệm vụ ---------- */
+window.showMissionHistory = async () => {
+  const rows = await api('/missions');
+  const stIcon = { done: '✅', failed: '❌', over_budget: '⛔', paused: '⏸', running: '⚡', waiting_approval: '🔔', briefing: '💬', planning: '🧠', reporting: '📨' };
+  openModal(`
+   <div style="font-weight:800;font-size:15px;margin-bottom:12px">📜 Lịch sử nhiệm vụ</div>
+   ${rows.length ? rows.map(m => `
+    <div class="setrow" style="cursor:pointer" onclick="showMissionFull('${m.id}')">
+      <div class="sl"><b>${stIcon[m.status] || ''} ${esc(m.title)}</b>
+      <span>${new Date(m.created_at).toLocaleString('vi-VN')} · ${m.progress}% · ${vnd(m.spent_vnd)}</span></div>
+      <span style="color:var(--dim)">›</span>
+    </div>`).join('') : '<div style="color:var(--muted)">Chưa có nhiệm vụ nào.</div>'}
+   <button class="btn ghost" style="margin-top:12px" onclick="closeModal()">Đóng</button>`);
+};
+window.showMissionFull = async id => {
+  const m = await api(`/missions/${id}/full`);
+  if (m.error) return;
+  openModal(`
+   <div style="font-weight:800;font-size:15px">🎯 ${esc(m.title)}</div>
+   <div style="font-size:11.5px;color:var(--muted);margin:5px 0 12px">${new Date(m.created_at).toLocaleString('vi-VN')} · ${m.status} · chi phí ${vnd(m.spent_vnd)}</div>
+   ${m.report_html ? `<div class="dp-card" style="margin-bottom:10px"><h4>Báo cáo của COO</h4><div style="font-size:12.5px;line-height:1.6">${m.report_html}</div></div>` : ''}
+   <div class="dp-card" style="margin-bottom:10px"><h4>${m.tasks.length} đầu việc</h4>
+     ${m.tasks.map(t => `<div style="font-size:12px;padding:4px 0;cursor:pointer" onclick="showTaskDetail('${t.id}')">
+       ${t.status === 'done' ? '✅' : t.status === 'failed' ? '❌' : '⏳'} ${esc(t.title)} ${t.score ? `— <b style="color:var(--jade)">${t.score}đ</b>` : ''}</div>`).join('')}</div>
+   ${m.artifacts.length ? `<div style="margin-bottom:12px">${m.artifacts.map(a => `<span class="filelink" onclick="window.open('/api/artifacts/${a.id}/file')">${a.icon} ${esc(a.name)}</span>`).join('')}</div>` : ''}
+   <div style="display:flex;gap:8px">
+     ${['over_budget', 'paused'].includes(m.status) ? `<button class="btn jade" onclick="closeModal();resumeMission('${m.id}')">▶ Chạy tiếp</button>` : ''}
+     <button class="btn ghost" onclick="showMissionHistory()">← Danh sách</button>
+     <button class="btn ghost" onclick="closeModal()">Đóng</button>
+   </div>`);
+};
+
+/* ---------- Nhắn riêng 1-1 với agent ---------- */
+window.openDM = async id => {
+  const a = await api(`/agents/${id}`);
+  if (a.error) return;
+  const msgs = (a.dms || []).map(m => `<div class="msg ${m.role === 'ceo' ? 'ceo' : 'coo'}" style="max-width:100%">${esc(m.text)}</div>`).join('');
+  openModal(`
+   <div style="font-weight:800;font-size:15px">${a.avatar} Nhắn riêng với ${esc(a.name)}</div>
+   <div style="font-size:11px;color:var(--muted);margin:4px 0 10px">${esc(a.role_title)} · ${esc(a.dept_name)}</div>
+   <div id="dmlog" style="display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;padding:10px;background:var(--bg);border-radius:10px;border:1px solid var(--line)">
+     ${msgs || '<div style="color:var(--dim);font-size:12px">Chưa có tin nhắn nào — sếp hỏi gì cứ nhắn ạ.</div>'}
+   </div>
+   <div style="display:flex;gap:8px;margin-top:10px">
+     <input class="inp" id="dminput" placeholder="Nhắn cho ${esc(a.name)}…" style="flex:1" onkeydown="if(event.key==='Enter')sendDM('${id}')">
+     <button class="btn" onclick="sendDM('${id}')">Gửi</button>
+   </div>
+   <button class="btn ghost" style="margin-top:10px" onclick="closeModal()">Đóng</button>`);
+  const lg = $('#dmlog'); lg.scrollTop = lg.scrollHeight;
+  $('#dminput').focus();
+};
+window.sendDM = async id => {
+  const inp = $('#dminput'); const v = inp.value.trim(); if (!v) return;
+  inp.value = ''; inp.disabled = true;
+  const lg = $('#dmlog');
+  lg.insertAdjacentHTML('beforeend', `<div class="msg ceo" style="max-width:100%">${esc(v)}</div><div class="typing" id="dmtyping"><i></i><i></i><i></i></div>`);
+  lg.scrollTop = lg.scrollHeight;
+  const r = await post(`/agents/${id}/dm`, { text: v });
+  const tp = $('#dmtyping'); if (tp) tp.remove();
+  if (r.ok) lg.insertAdjacentHTML('beforeend', `<div class="msg coo" style="max-width:100%">${esc(r.reply)}</div>`);
+  inp.disabled = false; inp.focus(); lg.scrollTop = lg.scrollHeight;
+};
+
+/* ---------- Sửa kỹ năng / Đào tạo lại agent ---------- */
+window.openAgentEdit = async (id, trainMode) => {
+  const [a, skills] = await Promise.all([api(`/agents/${id}`), api('/skills')]);
+  if (a.error) return;
+  let prompt = a.system_prompt || '';
+  if (trainMode && a.failFeedbacks && a.failFeedbacks.length) {
+    const lessons = a.failFeedbacks.map(f => '- ' + f.feedback.slice(0, 160)).join('\n');
+    if (!prompt.includes('KINH NGHIỆM CẦN NHỚ')) prompt += `\n\nKINH NGHIỆM CẦN NHỚ (từ các lần bị trả lại):\n${lessons}`;
+  }
+  openModal(`
+   <div style="font-weight:800;font-size:15px">${trainMode ? '🎓 Đào tạo lại' : '✏️ Sửa kỹ năng'}: ${a.avatar} ${esc(a.name)}</div>
+   ${trainMode ? '<div style="font-size:11.5px;color:var(--amber);margin:5px 0">Em đã gom các nhận xét bị trả lại gần đây vào phần "KINH NGHIỆM CẦN NHỚ" — sếp duyệt/sửa rồi lưu.</div>' : ''}
+   <div class="wfield" style="margin-top:10px"><label>Chức danh</label><input class="inp" id="ae_role" value="${esc(a.role_title)}" style="width:100%"></div>
+   <div class="wfield"><label>Model (cấp bậc)</label><select class="sel" id="ae_model" style="width:100%">
+     ${['nv', 'tp', 'coo'].map(l => `<option value="${l}" ${a.model === l ? 'selected' : ''}>${{ nv: 'Haiku (nhân viên)', tp: 'Sonnet (trưởng phòng)', coo: 'Opus (điều phối)' }[l]}</option>`).join('')}</select></div>
+   <div class="wfield"><label>Skill được gắn</label><div style="display:flex;flex-wrap:wrap;gap:6px">
+     ${skills.map(s => `<label class="chip" style="cursor:pointer"><input type="checkbox" class="ae_skill" value="${s.id}" ${a.skills.includes(s.id) ? 'checked' : ''}> ${esc(s.id)}</label>`).join('')}</div></div>
+   <div class="wfield"><label>Vai trò & nguyên tắc (system prompt)</label>
+     <textarea class="inp" id="ae_prompt" rows="7">${esc(prompt)}</textarea></div>
+   <div style="display:flex;gap:8px">
+     <button class="btn" onclick="saveAgentEdit('${id}')">💾 Lưu</button>
+     <button class="btn ghost" onclick="closeModal()">Hủy</button>
+   </div>`);
+};
+window.saveAgentEdit = async id => {
+  const body = {
+    role_title: $('#ae_role').value,
+    model: $('#ae_model').value,
+    system_prompt: $('#ae_prompt').value,
+    skills: [...document.querySelectorAll('.ae_skill:checked')].map(c => c.value)
+  };
+  const r2 = await fetch(`/api/agents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(x => x.json());
+  closeModal();
+  if (r2.ok) { toast('✅ Đã cập nhật agent', 'Có hiệu lực từ lượt làm việc kế tiếp'); ORG = await api('/org'); if ($('#screen-hr').classList.contains('active')) refreshHR(); }
+  else toast('⚠️ Lỗi', r2.error || '', 'red');
+};
+window.toggleAgentEnabled = async id => {
+  const a = await api(`/agents/${id}`);
+  const r = await fetch(`/api/agents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: a.enabled ? 0 : 1 }) }).then(x => x.json());
+  if (r.ok) toast(a.enabled ? '⏸ Đã tạm dừng agent' : '▶ Đã kích hoạt lại', `${a.name} — ${a.enabled ? 'không nhận việc mới' : 'sẵn sàng nhận việc'}`, a.enabled ? 'amber' : '');
+  else toast('⚠️', r.error || 'Lỗi', 'red');
+};
+
+/* ---------- Tuyển nhân viên AI mới (4.4) ---------- */
+window.openHire = async () => {
+  const [org, skills] = await Promise.all([api('/org'), api('/skills')]);
+  const AVAS = ['🧑‍💼', '👩‍💻', '🧑‍🎨', '🧑‍🔬', '🕵️', '🧑‍🏫', '🧙', '🦸'];
+  openModal(`
+   <div style="font-weight:800;font-size:15px">＋ Tuyển nhân viên AI mới</div>
+   <div style="font-size:11.5px;color:var(--muted);margin:5px 0 12px">Mô tả vai trò bằng lời — hệ thống dựng hồ sơ, nhân viên xuất hiện ngay trên Sơ đồ sống.</div>
+   <div class="wgrid">
+     <div class="wfield"><label>Phòng ban</label><select class="sel" id="h_dept" style="width:100%">
+       ${org.depts.map(d => `<option value="${d.id}">${d.emoji} ${esc(d.name)}</option>`).join('')}</select></div>
+     <div class="wfield"><label>Avatar</label><select class="sel" id="h_ava" style="width:100%">${AVAS.map(a => `<option>${a}</option>`).join('')}</select></div>
+   </div>
+   <div class="wgrid">
+     <div class="wfield"><label>Tên</label><input class="inp" id="h_name" placeholder="VD: NV Chăm sóc đại lý" style="width:100%"></div>
+     <div class="wfield"><label>Chức danh</label><input class="inp" id="h_role" placeholder="VD: Chuyên viên kênh đại lý" style="width:100%"></div>
+   </div>
+   <div class="wfield"><label>Mô tả công việc (để dựng system prompt)</label>
+     <textarea class="inp" id="h_desc" rows="3" placeholder="VD: Chăm sóc hệ thống đại lý: soạn tin chúc mừng doanh số, nhắc công nợ lịch sự, tổng hợp phản hồi đại lý hằng tuần"></textarea></div>
+   <div class="wgrid">
+     <div class="wfield"><label>Cấp bậc model</label><select class="sel" id="h_level" style="width:100%">
+       <option value="nv">Haiku — nhân viên (nhanh, rẻ)</option><option value="tp">Sonnet — việc khó</option></select></div>
+     <div class="wfield"><label>Skill gắn kèm</label><select class="sel" id="h_skill" style="width:100%"><option value="">— không —</option>
+       ${skills.map(s => `<option value="${s.id}">${esc(s.id)}</option>`).join('')}</select></div>
+   </div>
+   <div style="display:flex;gap:8px">
+     <button class="btn" onclick="submitHire()">🎉 Tuyển vào công ty</button>
+     <button class="btn ghost" onclick="closeModal()">Hủy</button>
+   </div>`);
+};
+window.submitHire = async () => {
+  const desc = $('#h_desc').value.trim();
+  const body = {
+    dept_id: $('#h_dept').value, name: $('#h_name').value.trim(), avatar: $('#h_ava').value,
+    role_title: $('#h_role').value.trim() || $('#h_name').value.trim(), level: $('#h_level').value,
+    skills: $('#h_skill').value ? [$('#h_skill').value] : [],
+    role_block: desc ? `Bạn phụ trách: ${desc}. Làm đúng brief được giao, kết quả chuyên nghiệp, đúng giọng DNA thương hiệu, trả đúng format yêu cầu.` : undefined
+  };
+  const r = await post('/agents', body);
+  closeModal();
+  if (r.ok) { ORG = await api('/org'); buildOrg(); applyView(false); refreshHR(); }
+  else toast('⚠️ Chưa tuyển được', r.error || '', 'red');
+};
+
+/* ---------- CEO sửa nội dung rồi duyệt (ch9 "Sửa") ---------- */
+window.openApprovalEdit = async (apId, taskId) => {
+  const t = await api(`/tasks/${taskId}/detail`);
+  openModal(`
+   <div style="font-weight:800;font-size:15px">✏️ Sửa nội dung trước khi duyệt</div>
+   <div style="font-size:11.5px;color:var(--muted);margin:5px 0 10px">Bản sếp sửa sẽ là bản chạy thật (sinh file phiên bản mới trong Xưởng).</div>
+   <textarea class="inp" id="apedit_text" rows="14" style="font-family:'JetBrains Mono',monospace;font-size:11.5px">${esc(t.output || t.brief && t.brief.muc_tieu || '')}</textarea>
+   <div style="display:flex;gap:8px;margin-top:10px">
+     <button class="btn jade" onclick="submitApprovalEdit('${apId}')">✔ Duyệt bản đã sửa</button>
+     <button class="btn ghost" onclick="closeModal()">Hủy</button>
+   </div>`);
+};
+window.submitApprovalEdit = async apId => {
+  const txt = $('#apedit_text').value;
+  closeModal();
+  const r = await post(`/approvals/${apId}/decide`, { decision: 'edited', edited_text: txt });
+  if (r.ok) toast('✅ Đã duyệt bản CEO sửa', 'File phiên bản mới đã vào Xưởng');
+  refreshApprovals(); refreshTasks();
+};
+
+/* ---------- Lịch nhiệm vụ định kỳ ---------- */
+async function renderCrons() {
+  const rows = await api('/crons');
+  $('#cronlist').innerHTML = rows.length ? rows.map(c => `
+   <div class="setrow"><div class="sl"><b>${esc(c.title)}</b>
+     <span>${c.cadence === 'weekly' ? 'Hằng tuần (T2)' : 'Hằng ngày'} lúc ${c.hhmm} · ${c.last_run_at ? 'chạy gần nhất ' + new Date(c.last_run_at).toLocaleDateString('vi-VN') : 'chưa chạy lần nào'}</span></div>
+   <div class="toggle ${c.enabled ? 'on' : ''}" onclick="toggleCron('${c.id}',this)"></div>
+   <button style="color:var(--red);font-size:14px" onclick="delCron('${c.id}')">🗑</button></div>`).join('')
+    : '<div style="color:var(--muted);font-size:12px">Chưa có lịch nào. VD: mỗi sáng 8h tự tổng hợp việc cần làm trong ngày.</div>';
+}
+window.toggleCron = async (id, elx) => { await post(`/crons/${id}/toggle`); elx.classList.toggle('on'); };
+window.delCron = async id => { await fetch(`/api/crons/${id}`, { method: 'DELETE' }); renderCrons(); };
+
 /* nhịp thở: agent rảnh thi thoảng "ngó việc" */
 function ambient() {
   const idles = Object.keys(AGENTS).filter(id => AGENTS[id].state === 'idle' && id !== 'ceo');
@@ -572,7 +852,7 @@ function ambient() {
     const id = idles[Math.floor(Math.random() * idles.length)];
     const f = follow; follow = false;
     setState(id, 'think');
-    setTimeout(() => { if (AGENTS[id].state === 'think') setState(id, 'idle'); follow = f; }, 2200);
+    setTimeout(() => { if (AGENTS[id] && AGENTS[id].state === 'think') setState(id, 'idle'); follow = f; }, 2200);
   }
 }
 
@@ -627,6 +907,31 @@ function bindUI() {
     const r = await fetch('/api/brain/upload', { method: 'POST', body: fd }).then(x => x.json());
     toast(r.ok ? '📚 Đã nạp vào Brain' : '⚠️ Lỗi', r.ok ? `${f.name} · ${r.chunks} đoạn được index` : (r.error || ''), r.ok ? '' : 'red');
     refreshBrain();
+  });
+  $('#hirebtn').onclick = () => openHire();
+  $('#cron_add').onclick = async () => {
+    const cmd = $('#cron_cmd').value.trim();
+    if (!cmd) return toast('⚠️ Thiếu nội dung', 'Nhập nhiệm vụ cần chạy định kỳ', 'red');
+    const r = await post('/crons', { title: cmd.slice(0, 60), command: cmd, mode: 'go', cadence: $('#cron_cadence').value, hhmm: $('#cron_hhmm').value, dow: 1 });
+    if (r.ok) { $('#cron_cmd').value = ''; renderCrons(); toast('⏰ Đã thêm lịch định kỳ', cmd.slice(0, 60)); }
+    else toast('⚠️', r.error || 'Lỗi', 'red');
+  };
+  $('#skillzip').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
+    const r = await fetch('/api/skills/install', { method: 'POST', body: fd }).then(x => x.json());
+    toast(r.ok ? '🧩 Đã cài skill' : '⚠️ Lỗi', r.ok ? `${r.slug} — vào Nhân sự để gắn cho agent` : (r.error || ''), r.ok ? '' : 'red');
+    e.target.value = '';
+    refreshConnect();
+  });
+  $('#importfile').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    if (!confirm(`Khôi phục từ "${f.name}" sẽ GHI ĐÈ toàn bộ dữ liệu hiện tại và app sẽ tự thoát. Tiếp tục?`)) { e.target.value = ''; return; }
+    const fd = new FormData(); fd.append('file', f);
+    const r = await fetch('/api/backup/import', { method: 'POST', body: fd }).then(x => x.json());
+    if (r.ok) alert(r.message);
+    else toast('⚠️ Lỗi', r.error || '', 'red');
+    e.target.value = '';
   });
 }
 

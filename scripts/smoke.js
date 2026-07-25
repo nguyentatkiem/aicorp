@@ -36,7 +36,7 @@ function check(name, cond, detail) {
   check('Org: có agent + COO', org.agents.some(a => a.id === 'coo') && org.agents.length >= 13, org.agents.length + ' agent');
 
   // 2. Mission mode "ask" → COO hỏi lại → trả lời → chạy
-  const m1 = await post('/chat', { text: 'Tháng sau ra mắt trà đêm An Nhiên. Chuẩn bị content, dự toán chi phí, báo giá đại lý và FAQ.', mode: 'ask' });
+  const m1 = await post('/chat', { text: 'Tháng sau ra mắt trà đêm An Nhiên. Chuẩn bị content, dự toán chi phí, báo giá đại lý, FAQ và đăng bài đầu tiên lên fanpage.', mode: 'ask' });
   check('Tạo mission (mode ask)', m1.ok && m1.kind === 'mission', m1.missionId);
   await sleep(4000);
   let act = await get('/missions/active');

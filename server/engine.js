@@ -36,6 +36,14 @@ class ClaudeEngine {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function rnd(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
 
+/* Module năng lực từng phòng + planner (nạp mềm — thiếu module nào thì fallback bản canned) */
+const DEPT_MODULES = {};
+for (const d of ['mkt', 'kd', 'tckt', 'ns', 'cskh', 'vh', 'data']) {
+  try { DEPT_MODULES[d] = require('./demo/' + d); } catch { /* chưa có module */ }
+}
+let PLANNER = null;
+try { PLANNER = require('./demo/planner'); } catch { /* fallback demoPlan */ }
+
 function demoProduct(ctx) {
   const p = ctx?.dna?.products?.[0]?.name;
   return p || 'sản phẩm mới';
@@ -120,28 +128,105 @@ function demoPlan(ctx) {
   return JSON.stringify({ tasks: tasks.slice(0, 6) });
 }
 
+function demoBrief(ctx) {
+  if (ctx.answers) return JSON.stringify({ hieu_nhiem_vu: 'Đã rõ, triển khai theo hướng sếp chốt.', cau_hoi: [], ready: true });
+  if (PLANNER && PLANNER.briefQuestions) {
+    try {
+      const qs = PLANNER.briefQuestions(ctx.command || '', ctx) || [];
+      return JSON.stringify({
+        hieu_nhiem_vu: `Em hiểu nhiệm vụ: "${(ctx.command || '').slice(0, 120)}". Em sẽ rà DNA và chia việc cho các phòng phù hợp.`,
+        cau_hoi: qs.slice(0, 2), ready: qs.length === 0
+      });
+    } catch { /* fallback */ }
+  }
+  return JSON.stringify({
+    hieu_nhiem_vu: 'Chuẩn bị trọn bộ: content, số liệu chi phí, báo giá và FAQ.',
+    cau_hoi: ['Ưu tiên triển khai trên kênh nào trước ạ?'], ready: false
+  });
+}
+
+function demoPlanSmart(ctx) {
+  if (PLANNER && PLANNER.plan) {
+    try {
+      const out = PLANNER.plan(ctx.command || '', ctx);
+      if (out && Array.isArray(out.tasks) && out.tasks.length) return JSON.stringify(out);
+    } catch (e) { /* fallback */ }
+  }
+  return demoPlan(ctx);
+}
+
+function demoExecuteSmart(ctx) {
+  const t = ctx.task;
+  const mod = t && DEPT_MODULES[t.dept_id];
+  if (mod && mod.outputs) {
+    try {
+      const brief = typeof t.brief === 'string' ? JSON.parse(t.brief || '{}') : (t.brief || {});
+      const fn = mod.outputs[t.assignee_id] || mod.outputs.default;
+      if (fn) {
+        const md = fn(brief, { dna: ctx.dna, round: ctx.round || 0, command: ctx.command || '', task: t });
+        if (md && md.length > 100) return '```output\n' + md + '\n```';
+      }
+    } catch (e) { /* fallback */ }
+  }
+  return demoExecute(ctx);
+}
+
+function demoReviewSmart(ctx) {
+  const t = ctx.task || {};
+  let brief = {};
+  try { brief = typeof t.brief === 'string' ? JSON.parse(t.brief || '{}') : (t.brief || {}); } catch {}
+  const nguong = ctx.nguong || 90; // đọc ngưỡng điểm cấu hình (đặc tả 5.4) thay vì hardcode 90
+  // Vòng 1 của NV Content trượt để demo vòng trả lại — TRỪ khi CEO đã boost model
+  // hoặc đã kèm góp ý trực tiếp (làm lại theo chỉ đạo thì phải đạt)
+  const isContentR1 = t.assignee_id === 'nv_content' && (ctx.round || 0) === 0
+    && !brief.model_boost && !brief.ceo_feedback;
+  // điểm đạt sinh trong [ngưỡng, 97] để luôn qua; điểm trượt = ngưỡng - 3
+  const score = isContentR1 ? Math.max(0, nguong - 3) : rnd(Math.min(nguong, 97), 97);
+  const pass = !isContentR1;
+  const mod = DEPT_MODULES[t.dept_id];
+  if (mod && mod.reviews) {
+    try {
+      const brief = typeof t.brief === 'string' ? JSON.parse(t.brief || '{}') : (t.brief || {});
+      const fn = mod.reviews[t.assignee_id] || mod.reviews.default;
+      if (fn) {
+        const r = fn(brief, { dna: ctx.dna, round: ctx.round || 0, command: ctx.command || '', task: t }, pass);
+        if (r && r.feedback_chi_tiet) return JSON.stringify({ score, feedback_chi_tiet: r.feedback_chi_tiet, loi_cu_the: r.loi_cu_the || [] });
+      }
+    } catch (e) { /* fallback */ }
+  }
+  return demoReview(ctx);
+}
+
+function demoDM(ctx) {
+  const a = ctx.agent || {};
+  const dna = ctx.dna || {};
+  const q = (ctx.text || '').toLowerCase();
+  const name = dna.company ? dna.company.name : 'công ty mình';
+  if (/(làm gì|nhiệm vụ|năng lực|giúp gì|kỹ năng)/.test(q)) {
+    return `Dạ sếp! Em là ${a.name} — ${a.role_title}. ${a.system_prompt ? a.system_prompt.split('.')[0] + '.' : ''} Sếp cứ giao việc qua AI COO ở khung chat chính, việc thuộc mảng của em sẽ tự đến tay em ạ.`;
+  }
+  if (/(bận|đang làm|tiến độ|xong chưa)/.test(q)) {
+    return `Dạ, em đang ở trạng thái sẵn sàng. Mọi tiến độ chi tiết sếp xem ở thẻ Nhiệm vụ hoặc War Room nhé ạ. Có việc gấp thuộc mảng ${a.role_title} thì sếp giao qua COO, em nhận ngay!`;
+  }
+  return `Dạ em nghe, thưa sếp! Em là ${a.name} của ${name}. Về "${(ctx.text || '').slice(0, 80)}" — nếu sếp muốn em làm thành sản phẩm hoàn chỉnh, sếp giao qua khung chat với AI COO để có brief và review đầy đủ nhé. Còn cần em tư vấn nhanh góc nhìn ${a.role_title} thì em luôn sẵn sàng ạ!`;
+}
+
 class DemoEngine {
   constructor() { this.kind = 'demo'; }
   async call(kind, p) {
     const ctx = p.ctx || {};
-    await sleep(kind === 'execute' ? rnd(2500, 4500) : rnd(1000, 2200)); // nhịp cho UI sống động
+    await sleep(kind === 'execute' ? rnd(2500, 4500) : kind === 'dm' ? rnd(600, 1200) : rnd(1000, 2200)); // nhịp cho UI sống động
     let text;
     switch (kind) {
-      case 'brief':
-        text = ctx.answers
-          ? JSON.stringify({ hieu_nhiem_vu: 'Đã rõ, triển khai theo hướng sếp chốt.', cau_hoi: [], ready: true })
-          : JSON.stringify({
-              hieu_nhiem_vu: 'Chuẩn bị trọn bộ ra mắt: content, số liệu chi phí, báo giá đại lý và FAQ.',
-              cau_hoi: ['Ưu tiên ra mắt trên Facebook hay TikTok Shop trước ạ?'], ready: false
-            });
-        break;
-      case 'plan': text = demoPlan(ctx); break;
-      case 'execute': text = demoExecute(ctx); break;
-      case 'review': text = demoReview(ctx); break;
+      case 'brief': text = demoBrief(ctx); break;
+      case 'plan': text = demoPlanSmart(ctx); break;
+      case 'execute': text = demoExecuteSmart(ctx); break;
+      case 'review': text = demoReviewSmart(ctx); break;
+      case 'dm': text = demoDM(ctx); break;
       case 'report':
         text = `<ul><li>✅ ${ctx.doneCount || 0} nhánh hoàn thành, điểm trung bình ${ctx.avgScore || '—'}/100</li>` +
-          `<li>📌 Phát hiện: đối thủ cùng phân khúc đang giảm giá 20% tuần này — em đề xuất đẩy lịch ra mắt sớm 3 ngày</li>` +
-          `<li>⏭️ Bước tiếp theo: duyệt bài đăng trong Hộp phê duyệt, sau đó chạy ads test</li>` +
+          (ctx.taskLines ? ctx.taskLines.map(l => `<li>${l}</li>`).join('') : '') +
+          `<li>⏭️ Bước tiếp theo: ${ctx.pendingApprovals ? 'duyệt các việc đang chờ trong Hộp phê duyệt' : 'sếp giao nhiệm vụ kế tiếp hoặc đặt lịch chạy định kỳ'}</li>` +
           `<li>💰 Chi phí nhiệm vụ: ${(ctx.costVnd || 0).toLocaleString('vi-VN')}đ</li></ul>`;
         break;
       default: text = '```output\n(demo)\n```';

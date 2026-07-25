@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AICORP — Công ty AI của bạn</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏢</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -115,7 +116,7 @@
     <!-- ========= SCREEN: NHÂN SỰ AI ========= -->
     <section class="screen" id="screen-hr">
       <div class="page">
-        <h2>👥 Nhân sự AI</h2>
+        <h2>👥 Nhân sự AI <button class="btn" id="hirebtn" style="margin-left:auto">＋ Tuyển nhân viên AI mới</button></h2>
         <div class="psub" id="hrsub">Bấm vào từng người trên Sơ đồ sống để xem hồ sơ chi tiết.</div>
         <div class="card"><div id="hrtbl"></div></div>
       </div>
@@ -156,7 +157,9 @@
         </div>
         <div class="grid2">
           <div class="card"><h3>🔗 Kết nối MCP &amp; n8n</h3><div id="connlist"></div></div>
-          <div class="card"><h3>🧩 Thư viện Skill</h3><div id="skilllist"></div></div>
+          <div class="card"><h3>🧩 Thư viện Skill
+            <label class="btn ghost" style="margin-left:auto;padding:5px 12px;cursor:pointer">＋ Cài skill (.zip)<input type="file" id="skillzip" accept=".zip" style="display:none"></label>
+          </h3><div id="skilllist"></div></div>
         </div>
       </div>
     </section>
@@ -196,6 +199,25 @@
               <input class="inp" id="set_concurrent" type="number" style="width:110px"></div>
             <div class="setrow"><div class="sl"><b>Tỷ giá USD → VND</b><span>Để quy đổi chi phí token</span></div>
               <input class="inp" id="set_usdvnd" type="number" style="width:110px"></div>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <h3>⏰ Nhiệm vụ định kỳ <span class="ftag" style="background:rgba(143,124,246,.12);color:var(--violet)">tự chạy theo lịch</span></h3>
+            <div id="cronlist"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+              <input class="inp" id="cron_cmd" placeholder="VD: Tổng hợp phản hồi khách và đề xuất cải thiện" style="flex:1;min-width:220px">
+              <select class="sel" id="cron_cadence"><option value="daily">Hằng ngày</option><option value="weekly">Hằng tuần (T2)</option></select>
+              <input class="inp" id="cron_hhmm" value="08:00" style="width:70px">
+              <button class="btn ghost" id="cron_add" style="padding:7px 13px">＋ Thêm lịch</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>💾 Sao lưu &amp; khôi phục</h3>
+            <div class="setrow"><div class="sl"><b>Xuất bản sao lưu .aicorp</b><span>DNA + agent + bộ nhớ + file sản phẩm — KHÔNG kèm API key</span></div>
+              <button class="btn ghost" style="padding:6px 14px" onclick="window.open('/api/backup')">⬇ Xuất</button></div>
+            <div class="setrow"><div class="sl"><b>Khôi phục từ file .aicorp</b><span>Ghi đè dữ liệu hiện tại — app sẽ tự thoát, chạy lại npm start</span></div>
+              <label class="btn ghost" style="padding:6px 14px;cursor:pointer">⬆ Nhập<input type="file" id="importfile" accept=".aicorp,.zip" style="display:none"></label></div>
           </div>
         </div>
         <button class="btn" id="savesettings">💾 Lưu cài đặt</button>

@@ -10,6 +10,22 @@ const { buildArtifact, ICONS } = require('./artifacts');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+/* Lọc HTML do LLM sinh ra trước khi đưa vào UI — chống XSS khi dùng engine thật (chương 9 an toàn) */
+function sanitizeHtml(html) {
+  if (!html) return '';
+  let s = String(html);
+  s = s.replace(/<\s*(script|style|iframe|object|embed|link|meta|form|input|svg|math)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '');
+  s = s.replace(/<\s*\/?\s*(script|style|iframe|object|embed|link|meta|form|input|svg|math)\b[^>]*>/gi, '');
+  const ALLOW = ['ul', 'ol', 'li', 'b', 'i', 'em', 'strong', 'br', 'p', 'small', 'u', 'span'];
+  // khớp cả thẻ không có whitespace sau tên (vd <img/onerror=…>) bằng cách bắt tên rồi phần còn lại tùy ý
+  s = s.replace(/<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*?>/g, (m, slash, tag) => {
+    tag = tag.toLowerCase();
+    if (!ALLOW.includes(tag)) return '';
+    return slash ? `</${tag}>` : `<${tag}>`;
+  });
+  return s.replace(/javascript\s*:/gi, '').replace(/\bon\w+\s*=/gi, '');
+}
+
 class Orchestrator {
   constructor(io) {
     this.io = io;
@@ -19,6 +35,13 @@ class Orchestrator {
       () => getCredentials().anthropic_api_key || process.env.ANTHROPIC_API_KEY
     );
     setInterval(() => this.tick().catch(e => log('tick error: ' + e.message)), 3000);
+    setInterval(() => { try { this.runCronCheck(); } catch (e) { log('cron error: ' + e.message); } }, 30000);
+  }
+
+  /* Danh bạ agent đang bật (dùng cho planner + brief) */
+  roster() {
+    return db.prepare(`SELECT a.id,a.dept_id,a.role_title,a.name,a.is_manager FROM agents a
+      JOIN departments d ON d.id=a.dept_id WHERE d.enabled=1 AND a.enabled=1 AND a.id!='coo'`).all();
   }
 
   /* ---------- helpers ---------- */
@@ -109,28 +132,51 @@ class Orchestrator {
   budgetOk(missionId, model) {
     const m = this.mission(missionId);
     if (!m) return false;
+    // mission bị CEO tạm dừng / đã chạm trần → mọi lượt gọi đang bay phải dừng ngay
+    if (['paused', 'over_budget', 'failed'].includes(m.status)) return false;
     const est = this.estimateNext(model);
-    if (m.spent_vnd + est > (m.budget_vnd || Infinity)) { this.overBudget(m, 'trần nhiệm vụ'); return false; }
-    if (this.todayVnd() + est > getSetting('tran_per_day', 100000)) { this.overBudget(m, 'trần ngày'); return false; }
+    const reserved = this.reservedVnd(missionId);
+    if (m.spent_vnd + reserved + est > (m.budget_vnd || Infinity)) { this.overBudget(m, 'trần nhiệm vụ'); return false; }
+    if (this.todayVnd() + this.reservedVnd(null) + est > getSetting('tran_per_day', 100000)) { this.overBudget(m, 'trần ngày'); return false; }
     return true;
+  }
+
+  /* Chống race 2 task song song cùng lách qua budgetOk (TOCTOU): giữ chỗ ước tính khi lượt gọi đang bay */
+  reservedVnd(missionId) {
+    if (!this._reserved) this._reserved = new Map();
+    let s = 0;
+    for (const [, r] of this._reserved) if (missionId === null || r.missionId === missionId) s += r.vnd;
+    return s;
+  }
+  reserve(missionId, vnd) {
+    if (!this._reserved) this._reserved = new Map();
+    const key = Symbol();
+    this._reserved.set(key, { missionId, vnd });
+    return () => this._reserved.delete(key);
   }
 
   overBudget(m, why) {
     if (m.status === 'over_budget') return;
     db.prepare("UPDATE tasks SET status='todo' WHERE mission_id=? AND status IN ('doing','submitted','reviewing')").run(m.id);
     this.setMission(m.id, 'over_budget');
-    this.chat('coo', `⛔ <b>Nhiệm vụ tạm dừng vì chạm ${why}</b> (đã dùng ${m.spent_vnd.toLocaleString('vi-VN')}đ / trần ${(m.budget_vnd || 0).toLocaleString('vi-VN')}đ). Sếp có thể nâng trần trong Cài đặt rồi bấm "Chạy tiếp", hoặc hủy nhiệm vụ ạ.`, m.id);
+    const nums = why === 'trần ngày'
+      ? `hôm nay đã dùng ${this.todayVnd().toLocaleString('vi-VN')}đ / trần ngày ${getSetting('tran_per_day', 100000).toLocaleString('vi-VN')}đ`
+      : `nhiệm vụ đã dùng ${m.spent_vnd.toLocaleString('vi-VN')}đ / trần ${(m.budget_vnd || 0).toLocaleString('vi-VN')}đ`;
+    this.chat('coo', `⛔ <b>Nhiệm vụ tạm dừng vì chạm ${why}</b> (${nums}). Sếp có thể nâng trần trong Cài đặt rồi bấm "Chạy tiếp", hoặc hủy nhiệm vụ ạ.`, m.id);
     this.setAgent('coo', 'wait', 'Chạm trần chi phí — chờ CEO quyết');
     log(`mission ${m.id} over_budget (${why})`);
   }
 
   /* ---------- gọi engine có kiểm soát ---------- */
-  async llm(kind, { level, agentId, missionId, system, user, ctx }) {
+  async llm(kind, { level, agentId, missionId, system, user, ctx, skipBudget }) {
     const model = this.modelFor(level || 'nv');
-    if (missionId && !this.budgetOk(missionId, model)) throw new Error('OVER_BUDGET');
-    const res = await this.engine.call(kind, { model, system, user, ctx, maxTokens: 4096 });
-    this.addCost(missionId, agentId || 'coo', model, res.inputTokens, res.outputTokens);
-    return res.text;
+    if (missionId && !skipBudget && !this.budgetOk(missionId, model)) throw new Error('OVER_BUDGET');
+    const release = missionId ? this.reserve(missionId, this.estimateNext(model)) : () => {};
+    try {
+      const res = await this.engine.call(kind, { model, system, user, ctx, maxTokens: 4096 });
+      this.addCost(missionId, agentId || 'coo', model, res.inputTokens, res.outputTokens);
+      return res.text;
+    } finally { release(); }
   }
 
   brainSearch(query) {
@@ -171,11 +217,12 @@ class Orchestrator {
     this.setAgent('coo', 'think', 'Phân tích nhiệm vụ · đối chiếu DNA & bộ nhớ công ty…');
     if (m.mode === 'go') { this.typing(false); return this.runPlanning(missionId, null); }
     try {
+      const roster = this.roster();
       const text = await this.llm('brief', {
         level: 'coo', agentId: 'coo', missionId,
         system: 'Bạn là AI COO. Chỉ trả về JSON hợp lệ.',
         user: P.briefBack(m.ceo_command, this.dna(), this.brainSearch(m.ceo_command)),
-        ctx: { dna: this.dna(), answers: null }
+        ctx: { dna: this.dna(), answers: null, command: m.ceo_command, roster, enabledDepts: [...new Set(roster.map(r => r.dept_id))] }
       });
       const j = parseJson(text);
       this.typing(false);
@@ -196,8 +243,7 @@ class Orchestrator {
     this.setMission(missionId, 'planning');
     this.typing(true);
     this.setAgent('coo', 'work', 'Chia task · xếp dependency · chọn người phù hợp…');
-    const roster = db.prepare(`SELECT a.id,a.dept_id,a.role_title,a.name,a.is_manager FROM agents a
-      JOIN departments d ON d.id=a.dept_id WHERE d.enabled=1 AND a.enabled=1 AND a.id!='coo'`).all();
+    const roster = this.roster();
     const rosterTxt = roster.map(r => `${r.id} · ${r.dept_id} · ${r.name} — ${r.role_title}`).join('\n');
     const enabledDepts = [...new Set(roster.map(r => r.dept_id))];
     try {
@@ -207,7 +253,7 @@ class Orchestrator {
           level: 'coo', agentId: 'coo', missionId,
           system: 'Bạn là AI COO. Chỉ trả về JSON hợp lệ.',
           user: P.planWBS(m.ceo_command, answers, this.dna(), rosterTxt) + (attempt ? '\nCHÚ Ý: lần trước JSON lỗi, chỉ trả JSON thuần.' : ''),
-          ctx: { dna: this.dna(), enabledDepts, answers }
+          ctx: { dna: this.dna(), enabledDepts, answers, command: m.ceo_command, roster }
         });
         try { tasks = parseJson(text).tasks; } catch { tasks = null; }
       }
@@ -217,21 +263,30 @@ class Orchestrator {
       const ins = db.prepare(`INSERT INTO tasks(id,mission_id,dept_id,assignee_id,reviewer_id,title,brief,deps_json,status,review_round,real_action_json,created_at)
         VALUES(?,?,?,?,?,?,?,?,?,0,?,?)`);
       const created = [];
-      const idMap = {};
-      tasks.slice(0, 12).forEach((t, i) => {
-        if (!validIds.has(t.assignee_id)) return;
+      // ánh xạ mọi cách planner có thể tham chiếu 1 task: theo CHỈ SỐ mảng (0-based, số hoặc chuỗi)
+      // và theo id chuỗi tường minh nếu có. Hai không gian tách riêng để không đè nhau.
+      const byOrigIndex = {};   // vị trí gốc trong mảng tasks → tid
+      const byExplicitId = {};  // t.id (nếu planner đặt) → tid
+      const original = tasks.slice(0, 12);
+      original.forEach((t, i) => {
+        if (!validIds.has(t.assignee_id)) return; // agent không tồn tại/đã tắt → bỏ task (deps trỏ tới sẽ bị lọc)
         const tid = uid('t');
-        idMap[t.id || `t${i + 1}`] = tid; idMap[String(i)] = tid;
+        byOrigIndex[i] = tid;
+        if (t.id != null && typeof t.id !== 'number') byExplicitId[String(t.id)] = tid;
         const reviewer = validIds.has(t.reviewer_id) ? t.reviewer_id : (managers[t.dept_id] || t.assignee_id);
         ins.run(tid, missionId, t.dept_id, t.assignee_id, reviewer, String(t.title).slice(0, 120),
-          JSON.stringify(t.brief || {}), JSON.stringify(t.deps || []), 'todo',
+          JSON.stringify(t.brief || {}), JSON.stringify([]), 'todo',
           t.real_action ? JSON.stringify(t.real_action) : null, now());
-        created.push({ tid, t });
+        created.push({ tid, t, i });
       });
-      // map deps sang id thật
+      // map deps: số → chỉ số mảng gốc; chuỗi → id tường minh (rồi mới thử chỉ số)
       for (const { tid, t } of created) {
-        const deps = (t.deps || []).map(d => idMap[d]).filter(Boolean);
-        db.prepare('UPDATE tasks SET deps_json=? WHERE id=?').run(JSON.stringify(deps), tid);
+        const deps = (t.deps || []).map(d => {
+          if (typeof d === 'number') return byOrigIndex[d];
+          const s = String(d);
+          return byExplicitId[s] != null ? byExplicitId[s] : byOrigIndex[Number(s)];
+        }).filter(dep => dep && dep !== tid);
+        db.prepare('UPDATE tasks SET deps_json=? WHERE id=?').run(JSON.stringify([...new Set(deps)]), tid);
       }
       if (!created.length) throw new Error('Kế hoạch không có task hợp lệ');
       db.prepare('UPDATE missions SET plan_json=? WHERE id=?').run(JSON.stringify({ tasks }), missionId);
@@ -277,6 +332,14 @@ class Orchestrator {
           continue;
         }
         if (depRows.some(d => d.status !== 'done')) continue;
+        // agent bị tạm dừng / phòng bị tắt sau khi task đã tạo → không giao (đặc tả 4/10)
+        const av = db.prepare('SELECT a.enabled ae, d.enabled de FROM agents a JOIN departments d ON d.id=a.dept_id WHERE a.id=?').get(t.assignee_id);
+        if (!av || !av.ae || !av.de) {
+          this.setTask(t, 'failed');
+          this.agentLog('coo', `Nhánh "${t.title}" bị hủy: người phụ trách đã tạm dừng hoặc phòng bị tắt`, 'warn');
+          this.checkMissionDone(m.id);
+          continue;
+        }
         this.active.set(t.id, true);
         this.runTask(t).catch(e => {
           log(`task ${t.id} crash: ${e.stack || e.message}`);
@@ -295,6 +358,7 @@ class Orchestrator {
     const tp = this.agent(task.reviewer_id);
     const brief = JSON.parse(task.brief || '{}');
     const dna = this.dna();
+    const missionCmd = (this.mission(task.mission_id) || {}).ceo_command || '';
 
     this.setTask(task, 'doing');
     this.packet(tp.id, nv.id, 'gold');
@@ -312,13 +376,19 @@ class Orchestrator {
       let outText;
       try {
         outText = await this.withRetry(() => this.llm('execute', {
-          level: 'nv', agentId: nv.id, missionId: task.mission_id,
+          level: brief.model_boost ? 'tp' : 'nv', agentId: nv.id, missionId: task.mission_id,
           system: P.agentSystem(nv, dna, this.skillTextFor(nv), this.brainSearch(task.title + ' ' + (brief.muc_tieu || ''))),
           user: P.execute(brief, feedback, round + 1),
-          ctx: { dna, task, round }
+          ctx: { dna, task, round, command: missionCmd }
         }));
       } catch (e) {
-        if (e.message === 'OVER_BUDGET') { this.active.delete(task.id); return; }
+        if (e.message === 'OVER_BUDGET') {
+          // trả task về hàng đợi để "Chạy tiếp" khôi phục được (không kẹt ở doing)
+          this.setTask(task, 'todo');
+          this.setAgent(nv.id, 'idle');
+          this.active.delete(task.id);
+          return;
+        }
         this.setTask(task, 'failed');
         this.setAgent(nv.id, 'idle');
         this.agentLog('coo', `⚠️ Task "${task.title}" lỗi: ${friendlyError(e)}`, 'error');
@@ -343,12 +413,22 @@ class Orchestrator {
           level: 'tp', agentId: tp.id, missionId: task.mission_id,
           system: 'Bạn là trưởng phòng khó tính. Chỉ trả về JSON hợp lệ.',
           user: P.review(tp, brief, lastOutput.slice(0, 8000), dna, nguong),
-          ctx: { dna, task, round }
+          ctx: { dna, task, round, command: missionCmd, nguong }
         }));
         rev = parseJson(revText);
       } catch (e) {
-        if (e.message === 'OVER_BUDGET') { this.active.delete(task.id); return; }
-        rev = { score: nguong, feedback_chi_tiet: '(review lỗi kỹ thuật — chấp nhận tạm với ngưỡng tối thiểu)' };
+        if (e.message === 'OVER_BUDGET') {
+          this.setTask(task, 'todo');
+          this.setAgent(tp.id, 'idle');
+          this.active.delete(task.id);
+          return;
+        }
+        // review lỗi API hết 3 lần backoff → task failed (đặc tả ch10), KHÔNG tự cho đậu
+        this.setTask(task, 'failed');
+        this.setAgent(tp.id, 'idle');
+        this.chat('coo', `⚠️ Nhánh "<b>${esc(task.title)}</b>" không review được (${esc(friendlyError(e))}). Em dừng nhánh này, sếp có thể giao lại sau ạ.`, task.mission_id);
+        this.active.delete(task.id);
+        return;
       }
       const score = Math.max(0, Math.min(100, Math.round(rev.score || 0)));
       const pass = score >= nguong;
@@ -375,7 +455,9 @@ class Orchestrator {
         this.createApproval(task, 'decision',
           `⚠️ "${task.title}" trượt review ${maxRounds} vòng (điểm cuối ${score}/100)`,
           `${nv.name} đã sửa ${maxRounds} vòng nhưng chưa đạt ngưỡng ${nguong}. Nhận xét cuối của ${tp.name}: ${rev.feedback_chi_tiet || ''}`,
-          [{ key: 'accept', label: `✔ Chấp nhận bản hiện tại (${score}đ, có ghi chú)` }, { key: 'drop', label: '✖ Hủy nhánh này' }],
+          [{ key: 'accept', label: `✔ Chấp nhận bản hiện tại (${score}đ, có ghi chú)` },
+           { key: 'retry_strong', label: '💪 Làm lại với model mạnh hơn' },
+           { key: 'drop', label: '✖ Hủy nhánh này' }],
           lastOutput.slice(0, 1200), null);
         this.setAgent('coo', 'wait', `Escalate: "${task.title}" cần CEO quyết`);
         this.active.delete(task.id);
@@ -394,7 +476,7 @@ class Orchestrator {
   async finishTask(task, nv, tp, brief, output, score) {
     /* Sinh artifact */
     const version = db.prepare('SELECT COUNT(*) c FROM artifacts WHERE task_id=?').get(task.id).c + 1;
-    const art = await buildArtifact({ title: task.title, content: output, format: brief.format_dau_ra || 'docx', version });
+    const art = await buildArtifact({ title: task.title, content: output, format: brief.format_dau_ra || 'docx', version, taskId: task.id });
     const artId = uid('art');
     db.prepare(`INSERT INTO artifacts(id,mission_id,task_id,agent_id,name,type,path,version,score,created_at)
       VALUES(?,?,?,?,?,?,?,?,?,?)`)
@@ -421,6 +503,104 @@ class Orchestrator {
       this.emit('toast', { title: '📄 File mới vào Xưởng', body: `${task.title} · ${score}/100`, cls: '' });
     }
     setTimeout(() => this.setAgent(nv.id, 'idle'), 2500);
+  }
+
+  /* Sinh lại artifact phiên bản mới (dùng khi CEO sửa nội dung trước khi duyệt) */
+  async regenArtifact(task, content, noteText) {
+    const brief = JSON.parse(task.brief || '{}');
+    const version = db.prepare('SELECT COUNT(*) c FROM artifacts WHERE task_id=?').get(task.id).c + 1;
+    const art = await buildArtifact({ title: task.title, content, format: brief.format_dau_ra || 'docx', version, taskId: task.id });
+    const artId = uid('art');
+    const prev = db.prepare('SELECT id FROM artifacts WHERE task_id=? ORDER BY version DESC LIMIT 1').get(task.id);
+    db.prepare(`INSERT INTO artifacts(id,mission_id,task_id,agent_id,name,type,path,version,prev_id,score,created_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(artId, task.mission_id, task.id, task.assignee_id, art.fileName, art.type, art.absPath, version, prev ? prev.id : null, task.score, now());
+    db.prepare('UPDATE tasks SET output_ref=? WHERE id=?').run(content.slice(0, 20000), task.id);
+    this.emit('artifact.new', { artifactId: artId, name: art.fileName, icon: ICONS[art.type] || '📄', agentId: task.assignee_id, score: task.score });
+    if (noteText) db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
+      .run('decision', `${noteText}: "${task.title}"`, task.mission_id, now());
+    return artId;
+  }
+
+  /* Bắn n8n webhook thật khi CEO duyệt hành động thật (8.3) */
+  async fireN8n(ap, task) {
+    try {
+      const conn = db.prepare("SELECT * FROM connections WHERE id='n8n_webhook'").get();
+      if (!conn || !conn.enabled) return;
+      const cfg = JSON.parse(conn.config_json || '{}');
+      if (!cfg.url || !/^https?:\/\//i.test(cfg.url)) return;
+      const art = db.prepare('SELECT name,type FROM artifacts WHERE task_id=? ORDER BY version DESC LIMIT 1').get(task.id);
+      const ctl = new AbortController();
+      const to = setTimeout(() => ctl.abort(), 6000);
+      const res = await fetch(cfg.url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
+        body: JSON.stringify({
+          event: 'real_action_approved',
+          approval: { id: ap.id, title: ap.title, action: JSON.parse(ap.action_json || 'null') },
+          task: { id: task.id, title: task.title, score: task.score },
+          artifact: art || null,
+          output: (task.output_ref || '').slice(0, 4000), at: now()
+        })
+      });
+      clearTimeout(to);
+      db.prepare("UPDATE connections SET last_used_at=?, status=? WHERE id='n8n_webhook'").run(now(), res.ok ? 'ready' : 'error');
+      this.emit('toast', { title: res.ok ? '🔄 Đã bắn n8n webhook' : `⚠️ n8n webhook trả lỗi ${res.status}`, body: cfg.url.slice(0, 60), cls: res.ok ? '' : 'red' });
+      log(`n8n webhook ${res.status} for ${ap.id}`);
+    } catch (e) {
+      log('n8n webhook fail: ' + e.message);
+      this.emit('toast', { title: '⚠️ n8n webhook không gọi được', body: String(e.message).slice(0, 80), cls: 'red' });
+    }
+  }
+
+  /* Lịch nhiệm vụ định kỳ (roadmap v1) — kiểm mỗi 30s */
+  runCronCheck(force) {
+    if (this._cronRunning) return 0; // chống chạy chồng
+    this._cronRunning = true;
+    try { return this._runCronCheck(force); } finally { this._cronRunning = false; }
+  }
+  _runCronCheck(force) {
+    const rows = db.prepare('SELECT * FROM crons WHERE enabled=1').all();
+    const nowD = new Date();
+    const hhmm = `${String(nowD.getHours()).padStart(2, '0')}:${String(nowD.getMinutes()).padStart(2, '0')}`;
+    // dùng NGÀY LOCAL (không phải UTC) để khớp giờ local — tránh chạy 2 lần quanh nửa đêm VN
+    const localDay = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, '0')}-${String(nowD.getDate()).padStart(2, '0')}`;
+    let fired = 0;
+    for (const c of rows) {
+      const ranToday = (c.last_run_local || '') === localDay;
+      if (ranToday) continue;
+      const dowOk = c.cadence !== 'weekly' || nowD.getDay() === (c.dow == null ? 1 : c.dow);
+      if (!force && !(dowOk && hhmm >= (c.hhmm || '08:00'))) continue;
+      db.prepare('UPDATE crons SET last_run_at=?, last_run_local=? WHERE id=?').run(now(), localDay, c.id);
+      this.chat('system', `⏰ Lịch định kỳ "<b>${esc(c.title)}</b>" đến giờ — em tự giao nhiệm vụ ạ.`, null);
+      this.createMission(c.command, c.mode || 'go').catch(e => log('cron mission err ' + e.message));
+      fired++;
+    }
+    return fired;
+  }
+
+  /* Nhắn riêng 1-1 giữa CEO và một agent */
+  async dmAgent(agentId, text) {
+    const a = this.agent(agentId);
+    if (!a) return { ok: false, error: 'Không có agent này' };
+    db.prepare('INSERT INTO dms(agent_id,role,text,at) VALUES(?,?,?,?)').run(agentId, 'ceo', String(text).slice(0, 2000), now());
+    let reply;
+    try {
+      const model = this.modelFor(a.model || 'nv');
+      const res = await this.engine.call('dm', {
+        model,
+        system: P.agentSystem(a, this.dna(), this.skillTextFor(a), '') +
+          '\nBạn đang nhắn riêng 1-1 với CEO. Trả lời ngắn gọn (≤120 từ), đúng vai, thân thiện, xưng "em" gọi "sếp". Không markdown, chỉ văn bản thường.',
+        user: String(text).slice(0, 2000), maxTokens: 600,
+        ctx: { agent: a, dna: this.dna(), text: String(text) }
+      });
+      this.addCost(null, agentId, model, res.inputTokens, res.outputTokens);
+      reply = sanitizeHtml(res.text).slice(0, 2000).trim() || 'Dạ em nghe sếp!';
+    } catch (e) {
+      reply = '😥 Em chưa trả lời được — ' + friendlyError(e);
+    }
+    db.prepare('INSERT INTO dms(agent_id,role,text,at) VALUES(?,?,?,?)').run(agentId, 'agent', reply, now());
+    this.agentLog(agentId, 'Nhắn riêng với CEO');
+    return { ok: true, reply };
   }
 
   bumpStats(agentId, score, rejected) {
@@ -451,9 +631,12 @@ class Orchestrator {
   }
 
   /* CEO quyết một approval */
-  async decideApproval(approvalId, decision, note) {
+  async decideApproval(approvalId, decision, note, editedText) {
     const ap = db.prepare('SELECT * FROM approvals WHERE id=?').get(approvalId);
     if (!ap || ap.status !== 'pending') return { ok: false, error: 'Approval không tồn tại hoặc đã quyết' };
+    // Approval Gate KHÔNG fail-open: decision lạ → từ chối xử lý, tuyệt đối không tự duyệt
+    const VALID = ['approve', 'accept', 'edited', 'reject', 'drop', 'retry_strong'];
+    if (!VALID.includes(decision)) return { ok: false, error: 'Quyết định không hợp lệ: ' + String(decision).slice(0, 30) };
     const task = db.prepare('SELECT * FROM tasks WHERE id=?').get(ap.task_id);
     const st = decision === 'reject' || decision === 'drop' ? 'rejected' : (decision === 'edited' ? 'edited' : 'approved');
     db.prepare('UPDATE approvals SET status=?, decided_at=? WHERE id=?').run(st, now(), approvalId);
@@ -461,13 +644,19 @@ class Orchestrator {
 
     if (ap.type === 'real_action') {
       if (st === 'approved' || st === 'edited') {
+        if (st === 'edited' && editedText && editedText.trim()) {
+          // "Sửa" (chương 9.2): bản CEO sửa là bản chạy — sinh artifact phiên bản mới
+          await this.regenArtifact(task, editedText.trim(), 'CEO sửa nội dung trước khi duyệt');
+        }
         this.setTask(task, 'done');
         db.prepare('UPDATE tasks SET done_at=? WHERE id=?').run(now(), task.id);
-        this.taskEvent(task.id, 'coo', 'real_action', { approvalId, action: ap.action_json, executed: true, mode: 'mock' });
+        this.taskEvent(task.id, 'coo', 'real_action', { approvalId, action: ap.action_json, executed: true, mode: 'mock', edited: st === 'edited' });
         db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
           .run('decision', `CEO đã duyệt: ${ap.title}${note ? ' — ghi chú: ' + note : ''}`, ap.mission_id, now());
-        this.setAgent('coo', 'work', 'CEO đã duyệt — chuyển lệnh cho kênh MCP (mô phỏng)');
+        this.setAgent('coo', 'work', 'CEO đã duyệt — chuyển lệnh cho kênh thực thi');
         this.emit('toast', { title: '✅ Đã thực hiện (mô phỏng MCP)', body: ap.title, cls: '' });
+        // đọc lại task từ DB để n8n nhận đúng BẢN CEO ĐÃ SỬA (regenArtifact vừa cập nhật output_ref)
+        await this.fireN8n(ap, db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id));
       } else if (note && note.trim()) {
         // từ chối KÈM LÝ DO → task quay lại NV làm lại theo góp ý CEO (chương 9.3)
         const brief = JSON.parse(task.brief || '{}');
@@ -475,7 +664,7 @@ class Orchestrator {
         db.prepare('UPDATE tasks SET brief=?, status=? WHERE id=?').run(JSON.stringify(brief), 'todo', task.id);
         this.setTask(task, 'todo');
         this.chat('coo', `Dạ, em chuyển lại cho ${esc(this.agent(task.assignee_id).name)} sửa "<b>${esc(task.title)}</b>" theo góp ý của sếp: <i>${esc(note)}</i>`, ap.mission_id);
-        this.setMission(ap.mission_id, 'running');
+        if (this.mission(ap.mission_id).status === 'waiting_approval') this.setMission(ap.mission_id, 'running');
         setTimeout(() => this.tick(), 800);
       } else {
         // từ chối không lý do → hủy hành động, giữ file trong Xưởng
@@ -487,6 +676,17 @@ class Orchestrator {
       if (decision === 'drop') {
         this.setTask(task, 'failed');
         this.chat('coo', `Đã hủy nhánh "<b>${esc(task.title)}</b>" theo quyết định của sếp.`, ap.mission_id);
+      } else if (decision === 'retry_strong') {
+        // Escalation 5.2b: làm lại bằng model mạnh hơn, mang theo toàn bộ nhận xét cũ
+        const lastRev = db.prepare('SELECT feedback FROM reviews WHERE task_id=? ORDER BY id DESC LIMIT 1').get(task.id);
+        const brief = JSON.parse(task.brief || '{}');
+        brief.model_boost = true;
+        if (lastRev && lastRev.feedback) brief.ceo_feedback = lastRev.feedback;
+        db.prepare('UPDATE tasks SET brief=?, review_round=0 WHERE id=?').run(JSON.stringify(brief), task.id);
+        this.setTask(task, 'todo');
+        this.chat('coo', `💪 Em cho ${esc(this.agent(task.assignee_id).name)} làm lại "<b>${esc(task.title)}</b>" bằng model mạnh hơn, kèm toàn bộ nhận xét cũ ạ.`, ap.mission_id);
+        if (this.mission(ap.mission_id).status === 'waiting_approval') this.setMission(ap.mission_id, 'running');
+        setTimeout(() => this.tick(), 800);
       } else {
         this.setTask(task, 'done');
         db.prepare('UPDATE tasks SET done_at=? WHERE id=?').run(now(), task.id);
@@ -503,13 +703,32 @@ class Orchestrator {
   checkMissionDone(missionId) {
     const m = this.mission(missionId);
     if (!m || !['running', 'waiting_approval'].includes(m.status)) return;
-    const rows = db.prepare('SELECT status FROM tasks WHERE mission_id=?').all(missionId);
+    let rows = db.prepare('SELECT id,status,deps_json FROM tasks WHERE mission_id=?').all(missionId);
     if (!rows.length) return;
-    const activeStates = ['todo', 'doing', 'submitted', 'reviewing', 'rejected'];
-    const anyActive = rows.some(r => activeStates.includes(r.status)) || [...this.active.keys()].some(tid => {
-      const t = db.prepare('SELECT mission_id FROM tasks WHERE id=?').get(tid); return t && t.mission_id === missionId;
-    });
-    if (anyActive) { if (m.status === 'waiting_approval') this.setMission(missionId, 'running'); return; }
+    let byId = Object.fromEntries(rows.map(r => [r.id, r]));
+    // cascade: task todo phụ thuộc nhánh đã hủy → hủy luôn (tránh zombie trong mission done)
+    let cascaded = false;
+    for (const r of rows) {
+      if (r.status !== 'todo') continue;
+      if (JSON.parse(r.deps_json || '[]').some(d => byId[d] && byId[d].status === 'failed')) {
+        this.setTask({ id: r.id, mission_id: missionId, status: r.status }, 'failed');
+        cascaded = true;
+      }
+    }
+    if (cascaded) {
+      rows = db.prepare('SELECT id,status,deps_json FROM tasks WHERE mission_id=?').all(missionId);
+      byId = Object.fromEntries(rows.map(r => [r.id, r]));
+    }
+    const inFlight = [...this.active.keys()].some(tid => byId[tid]);
+    const activeNow = rows.some(r => ['doing', 'submitted', 'reviewing', 'rejected'].includes(r.status));
+    // task todo chỉ tính "đang chạy" nếu deps đã xong (chạy được ngay);
+    // todo bị chặn bởi nhánh waiting_approval → mission phải hiện waiting_approval (đặc tả 5.1)
+    const runnableTodo = rows.some(r => r.status === 'todo' &&
+      JSON.parse(r.deps_json || '[]').every(d => !byId[d] || byId[d].status === 'done'));
+    if (inFlight || activeNow || runnableTodo) {
+      if (m.status === 'waiting_approval') this.setMission(missionId, 'running');
+      return;
+    }
     const anyWaiting = rows.some(r => r.status === 'waiting_approval');
     if (anyWaiting) { if (m.status !== 'waiting_approval') this.setMission(missionId, 'waiting_approval'); return; }
     // tất cả done/failed → báo cáo
@@ -519,6 +738,9 @@ class Orchestrator {
   async runReport(missionId) {
     const m = this.mission(missionId);
     if (m.status === 'reporting' || m.status === 'done') return;
+    if (this._reporting && this._reporting.has(missionId)) return; // chống runReport chạy 2 lần song song
+    if (!this._reporting) this._reporting = new Set();
+    this._reporting.add(missionId);
     this.setMission(missionId, 'reporting');
     this.typing(true);
     this.setAgent('coo', 'work', 'Tổng hợp kết quả · viết báo cáo cho CEO…');
@@ -529,12 +751,17 @@ class Orchestrator {
     let html;
     try {
       html = await this.llm('report', {
-        level: 'coo', agentId: 'coo', missionId,
+        level: 'coo', agentId: 'coo', missionId, skipBudget: true, // báo cáo là bước kết — không để budget guard chặn nửa chừng
         system: 'Bạn là AI COO báo cáo cho CEO. Chỉ trả về HTML đơn giản.',
         user: P.report(m, tasks.map(t => `"${t.title}" [${t.status}${t.score ? ' ' + t.score + 'đ' : ''}]`).join('; '),
           arts.map(a => a.name).join('; '), this.mission(missionId).spent_vnd),
-        ctx: { doneCount: tasks.filter(t => t.status === 'done').length, avgScore: avg, costVnd: this.mission(missionId).spent_vnd }
+        ctx: {
+          doneCount: tasks.filter(t => t.status === 'done').length, avgScore: avg, costVnd: this.mission(missionId).spent_vnd,
+          taskLines: tasks.map(t => `${t.status === 'done' ? '✅' : '⚠️'} ${esc(t.title)}${t.score ? ` — ${t.score}/100` : ''}`),
+          pendingApprovals: db.prepare("SELECT COUNT(*) c FROM approvals WHERE status='pending'").get().c
+        }
       });
+      html = sanitizeHtml(html); // chống XSS từ đầu ra LLM khi dùng engine thật
     } catch (e) {
       html = `<ul>${tasks.map(t => `<li>${t.status === 'done' ? '✅' : '⚠️'} ${esc(t.title)}${t.score ? ` — ${t.score}/100` : ''}</li>`).join('')}</ul>`;
     }
@@ -548,6 +775,7 @@ class Orchestrator {
     this.emit('toast', { title: '📨 COO đã gửi báo cáo', body: `${arts.length} file đính kèm trong Xưởng sản phẩm`, cls: '' });
     db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
       .run('lesson', `Nhiệm vụ "${m.title}" hoàn thành, điểm TB ${avg || '—'}, chi phí ${this.mission(missionId).spent_vnd}đ`, missionId, now());
+    if (this._reporting) this._reporting.delete(missionId);
   }
 
   /* Chạy tiếp mission over_budget sau khi CEO nâng trần */
@@ -556,9 +784,16 @@ class Orchestrator {
     if (!m) return { ok: false };
     if (newBudget) db.prepare('UPDATE missions SET budget_vnd=? WHERE id=?').run(newBudget, missionId);
     if (['over_budget', 'paused'].includes(m.status)) {
-      this.setMission(missionId, 'running');
+      const nTasks = db.prepare('SELECT COUNT(*) c FROM tasks WHERE mission_id=?').get(missionId).c;
       this.chat('coo', `▶ Em chạy tiếp nhiệm vụ "<b>${esc(m.title)}</b>" theo trần mới ạ.`, missionId);
-      this.tick();
+      if (nTasks === 0) {
+        // chạm trần từ lúc chưa kịp lập kế hoạch → lập kế hoạch lại từ đầu
+        this.setMission(missionId, 'briefing');
+        this.runPlanning(missionId, null).catch(e => this.failMission(missionId, e));
+      } else {
+        this.setMission(missionId, 'running');
+        this.tick();
+      }
     }
     return { ok: true };
   }
@@ -575,11 +810,21 @@ class Orchestrator {
 
   /* ---------- Khôi phục sau khi tắt app (5.3 checkpoint) ---------- */
   resume() {
-    const rows = db.prepare("SELECT * FROM missions WHERE status IN ('running','planning','reporting')").all();
+    const rows = db.prepare("SELECT * FROM missions WHERE status IN ('running','planning','reporting','briefing')").all();
     for (const m of rows) {
       db.prepare("UPDATE tasks SET status='todo' WHERE mission_id=? AND status IN ('doing','submitted','reviewing')").run(m.id);
-      if (m.status === 'planning') { db.prepare("UPDATE missions SET status='briefing' WHERE id=?").run(m.id); this.runPlanning(m.id, null).catch(() => {}); }
-      else db.prepare("UPDATE missions SET status='running' WHERE id=?").run(m.id);
+      const nTasks = db.prepare('SELECT COUNT(*) c FROM tasks WHERE mission_id=?').get(m.id).c;
+      if (m.status === 'briefing') {
+        // đang chờ CEO trả lời câu hỏi brief-back → giữ nguyên để CEO trả lời tiếp
+        if (m.plan_json && JSON.parse(m.plan_json).brief) { this.chat('system', `🔄 Khôi phục phiên: <b>${esc(m.title)}</b> đang chờ sếp trả lời câu hỏi của COO…`, m.id); continue; }
+        // tắt app khi COO chưa kịp hỏi → lập kế hoạch lại (không kẹt vĩnh viễn)
+        this.runPlanning(m.id, null).catch(e => this.failMission(m.id, e));
+      } else if (m.status === 'planning' || nTasks === 0) {
+        db.prepare("UPDATE missions SET status='briefing' WHERE id=?").run(m.id);
+        this.runPlanning(m.id, null).catch(e => this.failMission(m.id, e));
+      } else {
+        db.prepare("UPDATE missions SET status='running' WHERE id=?").run(m.id);
+      }
       this.chat('system', `🔄 Đang khôi phục phiên làm việc: <b>${esc(m.title)}</b>…`, m.id);
     }
     if (rows.length) setTimeout(() => this.tick(), 1500);

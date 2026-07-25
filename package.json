@@ -6,17 +6,26 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "test": "node scripts/test-full.js",
+    "test:audit": "node scripts/test-audit-fixes.js",
+    "test:ui": "node scripts/ui-smoke.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "adm-zip": "^0.6.0",
     "better-sqlite3": "^11.8.0",
     "docx": "^9.1.0",
     "exceljs": "^4.4.0",
     "express": "^4.21.0",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.2.0",
     "pptxgenjs": "^3.12.0",
     "socket.io": "^4.8.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.3.0"
   }
 }

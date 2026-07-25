@@ -69,7 +69,16 @@ CREATE TABLE IF NOT EXISTS cost_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, miss
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS chats (id INTEGER PRIMARY KEY AUTOINCREMENT, mission_id TEXT, role TEXT,
   html TEXT, at TEXT);
+CREATE TABLE IF NOT EXISTS dms (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT, role TEXT,
+  text TEXT, at TEXT);
+CREATE TABLE IF NOT EXISTS crons (id TEXT PRIMARY KEY, title TEXT, command TEXT, mode TEXT,
+  cadence TEXT, hhmm TEXT, dow INTEGER, enabled INTEGER DEFAULT 1, last_run_at TEXT, last_run_local TEXT, created_at TEXT);
 `);
+
+/* Migrate cột thêm sau (bỏ qua nếu đã có) */
+for (const [tbl, col, def] of [['crons', 'last_run_local', 'TEXT']]) {
+  try { db.prepare(`ALTER TABLE ${tbl} ADD COLUMN ${col} ${def}`).run(); } catch { /* đã có */ }
+}
 
 function uid(prefix) { return (prefix ? prefix + '_' : '') + crypto.randomBytes(5).toString('hex'); }
 function now() { return new Date().toISOString(); }

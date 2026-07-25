@@ -80,14 +80,32 @@ async function writePptx(fp, title, content) {
   await pptx.writeFile({ fileName: fp });
 }
 
+/* Lọc HTML fragment do LLM sinh: chỉ giữ thẻ trình bày an toàn, bỏ script/handler/style
+   → chống stored XSS khi CEO mở file .html trong Xưởng (cùng origin localhost). */
+function sanitizeFragment(html) {
+  let s = String(html || '');
+  s = s.replace(/<\s*\/?\s*(script|style|iframe|object|embed|link|meta|form|input|svg|math|base|template)\b[^>]*>/gi, '');
+  const ALLOW = new Set(['h1', 'h2', 'h3', 'h4', 'p', 'ul', 'ol', 'li', 'b', 'i', 'em', 'strong', 'br', 'hr',
+    'table', 'thead', 'tbody', 'tr', 'td', 'th', 'span', 'div', 'small', 'section', 'header', 'blockquote', 'code', 'pre']);
+  // thay từng thẻ: giữ tên nếu whitelist (bỏ mọi thuộc tính → diệt on*/style/href js), xóa nếu không
+  s = s.replace(/<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9]*)\b[^>]*?(\/?)\s*>/g, (m, slash, tag, selfClose) => {
+    tag = tag.toLowerCase();
+    if (!ALLOW.has(tag)) return '';
+    return slash ? `</${tag}>` : (['br', 'hr'].includes(tag) ? `<${tag}>` : `<${tag}>`);
+  });
+  return s.replace(/javascript\s*:/gi, '').replace(/\bon\w+\s*=/gi, '');
+}
+
 function writeHtml(fp, title, content) {
-  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  const body = /<[a-z][\s\S]*>/i.test(content) ? content
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const looksHtml = /<(h[1-6]|p|ul|ol|li|table|div|section|b|strong|br)\b/i.test(content);
+  const body = looksHtml ? sanitizeFragment(content)
     : esc(content).split('\n').map(l =>
         l.startsWith('# ') ? `<h1>${l.slice(2)}</h1>` :
         l.startsWith('## ') ? `<h2>${l.slice(3)}</h2>` :
         l.trim() ? `<p>${l}</p>` : '').join('\n');
   fs.writeFileSync(fp, `<!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><title>${esc(title)}</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;">
 <style>body{font-family:'Be Vietnam Pro',system-ui,sans-serif;max-width:840px;margin:40px auto;padding:0 20px;color:#1a2236;line-height:1.7}
 h1{color:#E4711E}h2{color:#26304A;border-bottom:2px solid #F6A821;padding-bottom:4px}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:6px 12px}</style>
 </head><body><h1>${esc(title)}</h1>\n${body}\n<hr><small>Tạo bởi AICORP · ${new Date().toLocaleString('vi-VN')}</small></body></html>`);
@@ -96,9 +114,11 @@ h1{color:#E4711E}h2{color:#26304A;border-bottom:2px solid #F6A821;padding-bottom
 const ICONS = { docx: '📄', xlsx: '📊', pptx: '🖥️', html: '📈', md: '📝', pdf: '📕' };
 
 /** Sinh file artifact; trả {fileName, absPath, type} — lỗi thì fallback .md */
-async function buildArtifact({ title, content, format, version }) {
+async function buildArtifact({ title, content, format, version, taskId }) {
   const type = ['docx', 'xlsx', 'pptx', 'html', 'md'].includes(format) ? format : 'docx';
-  const base = slugify(title) + (version > 1 ? `-v${version}` : '');
+  // thêm hậu tố ngắn từ taskId để 2 task khác nhau cùng tiêu đề KHÔNG ghi đè nhau
+  const suffix = taskId ? '-' + String(taskId).slice(-4) : '';
+  const base = slugify(title) + suffix + (version > 1 ? `-v${version}` : '');
   const fileName = `${base}.${type}`;
   const fp = path.join(DIRS.artifacts, fileName);
   try {
