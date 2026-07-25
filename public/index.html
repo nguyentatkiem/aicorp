@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AICORP — Công ty AI của bạn</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ========= NAV RAIL ========= -->
+  <nav id="rail">
+    <div class="logo">AC</div>
+    <button class="rail-btn active" data-screen="home">🗺️<span class="tip">Sơ đồ sống</span></button>
+    <button class="rail-btn" data-screen="factory">📦<span class="tip">Xưởng sản phẩm</span></button>
+    <button class="rail-btn" data-screen="approvals">🔔<span class="badge" id="apbadge" style="display:none">0</span><span class="tip">Hộp phê duyệt</span></button>
+    <button class="rail-btn" data-screen="hr">👥<span class="tip">Nhân sự AI</span></button>
+    <button class="rail-btn" data-screen="brain">🧠<span class="tip">Company Brain</span></button>
+    <button class="rail-btn" data-screen="connect">🔌<span class="tip">Kết nối &amp; Skill</span></button>
+    <div class="spacer"></div>
+    <button class="rail-btn" data-screen="settings">⚙️<span class="tip">Cài đặt</span></button>
+  </nav>
+
+  <div id="main">
+    <!-- ========= TOPBAR ========= -->
+    <header id="topbar">
+      <div class="co-badge">
+        <div class="co-ava" id="coava">🏢</div>
+        <div><div class="co-name" id="coname">AICORP</div><div class="co-sub">AICORP · Công ty AI</div></div>
+      </div>
+      <div class="top-pill"><span class="dot live"></span><b id="missioncount">0</b>&nbsp;nhiệm vụ đang chạy</div>
+      <div class="top-pill">⚡ <b id="activeagents">0</b>&nbsp;agent đang hoạt động</div>
+      <div class="spacer"></div>
+      <div class="top-pill cost-pill" id="costpill">💰 Hôm nay: <b id="costtoday">0đ</b><span style="color:var(--dim)" id="costcap">/ trần 100.000đ</span></div>
+      <div class="top-pill"><span class="dot amber"></span>Engine: <b id="enginename">Demo</b></div>
+      <div class="ceo-chip"><div class="ava">👤</div><span style="font-size:12px;font-weight:600" id="ceoname">CEO</span></div>
+    </header>
+
+    <!-- ========= SCREEN: HOME ========= -->
+    <section class="screen active" id="screen-home">
+      <div id="chatcol">
+        <div class="chead">
+          <div class="ava">🤖</div>
+          <div><div class="nm">AI COO — Giám đốc điều hành</div><div class="st" id="coostatus">● Sẵn sàng nhận lệnh</div></div>
+        </div>
+        <div id="msgs"></div>
+        <div class="mode-row">
+          <span class="mode-tag on" id="modeAsk">💬 Hỏi kỹ trước khi làm</span>
+          <span class="mode-tag" id="modeGo">🚀 Cứ làm đi</span>
+        </div>
+        <div id="chatinput">
+          <textarea id="ceoinput" placeholder="Giao nhiệm vụ cho công ty… (VD: Lên kế hoạch content tuần sau)"></textarea>
+          <button class="send" id="sendbtn">➤</button>
+        </div>
+      </div>
+
+      <div id="centercol">
+        <div id="tabs">
+          <button class="tab active" data-tab="org">🗺️ Sơ đồ sống</button>
+          <button class="tab" data-tab="kanban">📌 War Room</button>
+          <button class="tab" data-tab="timeline">📅 Dòng thời gian</button>
+        </div>
+
+        <div class="tabpane active" id="pane-org">
+          <div id="orgwrap"><div id="orgcanvas"><svg id="orgsvg"></svg></div></div>
+          <div id="missionbar" style="display:none">
+            <span class="dl">🎯 <b id="mbtitle"></b> — <span id="mbstatus"></span></span>
+          </div>
+          <div id="legend">
+            <span><span class="sq" style="background:var(--dim)"></span>Nghỉ</span>
+            <span><span class="sq" style="background:var(--violet)"></span>Suy nghĩ</span>
+            <span><span class="sq" style="background:var(--jade)"></span>Đang làm</span>
+            <span><span class="sq" style="background:var(--amber)"></span>Review</span>
+            <span><span class="sq" style="background:var(--red)"></span>Chờ CEO</span>
+          </div>
+          <div id="orgctl">
+            <button id="zin">＋</button>
+            <button id="zout">－</button>
+            <button id="zfit">⤢</button>
+            <button id="followbtn" class="on" title="Camera tự theo dõi hoạt động">🎥</button>
+          </div>
+        </div>
+
+        <div class="tabpane" id="pane-kanban"><div id="kanban"></div></div>
+        <div class="tabpane" id="pane-timeline"><div id="timeline"></div></div>
+      </div>
+
+      <div id="detailcol">
+        <div class="dhead" id="detailtitle">🎯 Nhiệm vụ đang chạy</div>
+        <div id="detailbody"></div>
+      </div>
+    </section>
+
+    <!-- ========= SCREEN: XƯỞNG SẢN PHẨM ========= -->
+    <section class="screen" id="screen-factory">
+      <div class="page">
+        <h2>📦 Xưởng sản phẩm</h2>
+        <div class="psub">Mọi file do công ty AI tạo ra — bấm Xem để mở/tải file thật (docx/xlsx/pptx/html).</div>
+        <div class="card"><div id="factorytbl"></div></div>
+      </div>
+    </section>
+
+    <!-- ========= SCREEN: HỘP PHÊ DUYỆT ========= -->
+    <section class="screen" id="screen-approvals">
+      <div class="page">
+        <h2>🔔 Hộp phê duyệt <span class="ftag" id="aphead" style="background:rgba(229,72,77,.15);color:var(--red)">0 việc chờ CEO</span></h2>
+        <div class="psub">Mọi <b>hành động thật</b> (đăng bài, gửi mail, nhắn khách) và quyết định trọng yếu đều dừng ở đây chờ sếp bấm nút. AI không bao giờ tự ý.</div>
+        <div id="approvallist"></div>
+      </div>
+    </section>
+
+    <!-- ========= SCREEN: NHÂN SỰ AI ========= -->
+    <section class="screen" id="screen-hr">
+      <div class="page">
+        <h2>👥 Nhân sự AI</h2>
+        <div class="psub" id="hrsub">Bấm vào từng người trên Sơ đồ sống để xem hồ sơ chi tiết.</div>
+        <div class="card"><div id="hrtbl"></div></div>
+      </div>
+    </section>
+
+    <!-- ========= SCREEN: COMPANY BRAIN ========= -->
+    <section class="screen" id="screen-brain">
+      <div class="page">
+        <h2>🧠 Company Brain</h2>
+        <div class="psub">Bộ nhớ doanh nghiệp — mọi agent nạp phần này trước khi làm bất kỳ việc gì.</div>
+        <div class="grid2">
+          <div class="card">
+            <h3>🧬 DNA Doanh nghiệp <button class="btn ghost" id="editdna" style="margin-left:auto;padding:5px 12px">✏️ Sửa (làm lại khảo sát)</button></h3>
+            <div id="dnabody"></div>
+          </div>
+          <div class="card">
+            <h3>📚 Kho tài liệu (RAG)
+              <label class="btn ghost" style="margin-left:auto;padding:5px 12px;cursor:pointer">＋ Nạp file<input type="file" id="brainfile" style="display:none"></label>
+            </h3>
+            <div id="braindocs"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>🗄️ Bộ nhớ dài hạn</h3>
+          <div id="memlist"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= SCREEN: KẾT NỐI & SKILL ========= -->
+    <section class="screen" id="screen-connect">
+      <div class="page">
+        <h2>🔌 Kết nối &amp; Skill</h2>
+        <div class="psub">Engine chạy hệ thống · Kết nối MCP để hành động thật · Cắm skill để agent làm việc theo công thức đã kiểm chứng.</div>
+        <div class="card">
+          <h3>⚡ Engine — nguồn sức mạnh của công ty</h3>
+          <div id="enginecards" class="grid2"></div>
+        </div>
+        <div class="grid2">
+          <div class="card"><h3>🔗 Kết nối MCP &amp; n8n</h3><div id="connlist"></div></div>
+          <div class="card"><h3>🧩 Thư viện Skill</h3><div id="skilllist"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= SCREEN: CÀI ĐẶT ========= -->
+    <section class="screen" id="screen-settings">
+      <div class="page">
+        <h2>⚙️ Cài đặt</h2>
+        <div class="psub">Model, chi phí, an toàn.</div>
+        <div class="grid2">
+          <div class="card">
+            <h3>🎛️ Engine &amp; model theo cấp bậc</h3>
+            <div class="setrow"><div class="sl"><b>Chế độ engine</b><span>Demo = chạy thử không tốn tiền · Claude API = chạy thật</span></div>
+              <select class="sel" id="set_engine"><option value="demo">Demo (miễn phí)</option><option value="api">Claude API</option></select></div>
+            <div class="setrow"><div class="sl"><b>API key Claude</b><span id="keystatus">Chưa có key</span></div>
+              <input class="inp" id="set_apikey" type="password" placeholder="sk-ant-…" style="width:170px"></div>
+            <div class="setrow"><div class="sl"><b>Kiểm tra kết nối</b><span id="testresult">&nbsp;</span></div>
+              <button class="btn ghost" id="testkey" style="padding:6px 14px">🔍 Kiểm tra</button></div>
+            <div class="setrow"><div class="sl"><b>AI COO (điều phối)</b><span>Cần suy luận sâu nhất</span></div>
+              <select class="sel" id="set_model_coo"></select></div>
+            <div class="setrow"><div class="sl"><b>Trưởng phòng (kế hoạch + review)</b><span>Cân bằng chất lượng/chi phí</span></div>
+              <select class="sel" id="set_model_tp"></select></div>
+            <div class="setrow"><div class="sl"><b>Nhân viên (thực thi)</b><span>Nhanh, rẻ, chạy song song</span></div>
+              <select class="sel" id="set_model_nv"></select></div>
+          </div>
+          <div class="card">
+            <h3>💰 Budget Guard</h3>
+            <div class="setrow"><div class="sl"><b>Trần chi phí / nhiệm vụ (đ)</b><span>Chạm trần → tạm dừng, báo CEO</span></div>
+              <input class="inp" id="set_tran_mission" type="number" style="width:110px"></div>
+            <div class="setrow"><div class="sl"><b>Trần chi phí / ngày (đ)</b><span id="usedtoday"></span></div>
+              <input class="inp" id="set_tran_day" type="number" style="width:110px"></div>
+            <div class="setrow"><div class="sl"><b>Số vòng review tối đa</b><span>Quá số vòng → escalate lên CEO</span></div>
+              <input class="inp" id="set_rounds" type="number" style="width:110px"></div>
+            <div class="setrow"><div class="sl"><b>Ngưỡng điểm đạt</b><span>Dưới ngưỡng → trả lại làm lại</span></div>
+              <input class="inp" id="set_nguong" type="number" style="width:110px"></div>
+            <div class="setrow"><div class="sl"><b>Số agent chạy song song</b><span>Mặc định 3</span></div>
+              <input class="inp" id="set_concurrent" type="number" style="width:110px"></div>
+            <div class="setrow"><div class="sl"><b>Tỷ giá USD → VND</b><span>Để quy đổi chi phí token</span></div>
+              <input class="inp" id="set_usdvnd" type="number" style="width:110px"></div>
+          </div>
+        </div>
+        <button class="btn" id="savesettings">💾 Lưu cài đặt</button>
+        <span id="savestatus" style="margin-left:10px;color:var(--jade);font-size:12px"></span>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<div id="modalwrap"><div id="modal"></div></div>
+
+<!-- ========= ONBOARDING WIZARD ========= -->
+<div id="wizardwrap"><div id="wizard"></div></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "aicorp",
+  "version": "1.0.0",
+  "description": "AICORP — Công ty AI chạy trên máy người dùng (CEO thật + AI COO + 7 phòng ban agent)",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "smoke": "node scripts/smoke.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "better-sqlite3": "^11.8.0",
+    "docx": "^9.1.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.0",
+    "multer": "^1.4.5-lts.1",
+    "pptxgenjs": "^3.12.0",
+    "socket.io": "^4.8.0"
+  }
+}

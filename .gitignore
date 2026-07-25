@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.DS_Store
+nohup.out
+# Dữ liệu runtime (~/AICORP trùng ~/aicorp trên macOS case-insensitive FS)
+data/
+workspace/
+secret/
