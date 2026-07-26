@@ -57,7 +57,7 @@ const check = (name, cond, detail) => { console.log(`${cond ? '✅' : '❌'} UI:
   /* Các màn hình khác */
   for (const [screen, sel, minEl] of [
     ['factory', '#factorytbl', 1], ['approvals', '#approvallist', 1], ['hr', '#hrtbl table', 1],
-    ['brain', '#dnabody .stat-row', 3], ['connect', '#connlist .setrow', 3], ['settings', '#set_engine', 1]
+    ['brain', '#dnabody .stat-row', 3], ['brain2', '#b2list .b2item', 3], ['connect', '#connlist .setrow', 3], ['settings', '#set_engine', 1]
   ]) {
     await page.click(`[data-screen="${screen}"]`);
     await new Promise(r => setTimeout(r, 1200));
@@ -65,6 +65,23 @@ const check = (name, cond, detail) => { console.log(`${cond ? '✅' : '❌'} UI:
     check(`Màn "${screen}" render`, n >= minEl, `${n} phần tử`);
   }
   await page.screenshot({ path: path.join(SHOT_DIR, 'ui-03-man-cuoi.png') });
+
+  /* Bộ não thứ 2: mở note, render markdown, backlink, toggle đồ thị */
+  await page.click('[data-screen="brain2"]');
+  await new Promise(r => setTimeout(r, 900));
+  await page.click('#b2list .b2item');
+  await new Promise(r => setTimeout(r, 500));
+  const noteBody = await page.$$eval('#b2main .b2body', els => els.length).catch(() => 0);
+  const wl = await page.$$eval('#b2main .wl', els => els.length).catch(() => 0);
+  check('Bộ não 2: mở note render markdown + wikilink', noteBody >= 1 && wl >= 1, `${wl} liên kết`);
+  await page.click('#b2mode'); // sang đồ thị
+  await new Promise(r => setTimeout(r, 1200));
+  const canvasShown = await page.$eval('#b2graphview', el => el.style.display !== 'none').catch(() => false);
+  const canvasW = await page.$eval('#b2canvas', el => el.width).catch(() => 0);
+  check('Bộ não 2: đồ thị vẽ trên canvas', canvasShown && canvasW > 0, `canvas ${canvasW}px`);
+  await page.screenshot({ path: path.join(SHOT_DIR, 'ui-04-bo-nao-2.png') });
+  await page.click('#b2mode'); // quay lại note (dừng rAF)
+  await new Promise(r => setTimeout(r, 400));
 
   /* War Room + timeline */
   await page.click('[data-screen="home"]');

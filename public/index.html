@@ -23,6 +23,7 @@
     <button class="rail-btn" data-screen="initiatives">💡<span class="badge" id="inibadge" style="display:none">0</span><span class="tip">Sáng kiến của COO</span></button>
     <button class="rail-btn" data-screen="hr">👥<span class="tip">Nhân sự AI</span></button>
     <button class="rail-btn" data-screen="brain">🧠<span class="tip">Company Brain</span></button>
+    <button class="rail-btn" data-screen="brain2">🕸️<span class="tip">Bộ não thứ 2</span></button>
     <button class="rail-btn" data-screen="connect">🔌<span class="tip">Kết nối &amp; Skill</span></button>
     <div class="spacer"></div>
     <button class="rail-btn" data-screen="settings">⚙️<span class="tip">Cài đặt</span></button>
@@ -177,6 +178,32 @@
         <div class="card">
           <h3>🗄️ Bộ nhớ dài hạn</h3>
           <div id="memlist"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========= SCREEN: BỘ NÃO THỨ 2 ========= -->
+    <section class="screen" id="screen-brain2">
+      <div class="page">
+        <h2>🕸️ Bộ não thứ 2 <span class="ftag" id="b2stats" style="background:var(--panel3);color:var(--muted);font-weight:500"></span></h2>
+        <div class="psub">Kho tri thức liên kết kiểu Obsidian — mỗi ghi chú là một file <b>.md</b> thật (mở được bằng Obsidian). Agent tự đọc theo đồ thị <code>[[liên kết]]</code> và tự ghi lại bài học sau mỗi nhiệm vụ để làm việc giỏi dần lên.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0">
+          <input id="b2search" class="inp" placeholder="🔍 Tìm trong bộ não…" style="flex:1;min-width:180px">
+          <button class="btn" id="b2new">＋ Ghi chú mới</button>
+          <button class="btn ghost" id="b2mode">🕸️ Đồ thị</button>
+          <button class="btn ghost" id="b2suggest" title="Cặp note nên nối với nhau">🔗 Gợi ý nối</button>
+          <button class="btn ghost" id="b2reindex" title="Nạp lại nếu bạn sửa file .md bên ngoài (Obsidian)">🔄 Nạp lại</button>
+        </div>
+        <div id="b2noteview" class="b2grid">
+          <div class="card b2list" id="b2list" style="padding:8px"></div>
+          <div class="card b2main" id="b2main"></div>
+          <div class="card b2side" id="b2side" style="padding:12px"></div>
+        </div>
+        <div id="b2graphview" style="display:none">
+          <div class="card" style="padding:0;overflow:hidden;position:relative">
+            <canvas id="b2canvas"></canvas>
+            <div id="b2legend" style="position:absolute;top:10px;left:12px;font-size:11px;color:var(--muted);pointer-events:none"></div>
+          </div>
         </div>
       </div>
     </section>

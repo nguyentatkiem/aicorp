@@ -10,6 +10,8 @@ const { buildArtifact, buildEml, buildIcs, ICONS } = require('./artifacts');
 const biz = require('./biz');
 const crm = require('./crm');
 const learning = require('./learning');
+const secondbrain = require('./secondbrain');
+const noteContent = require('./demo/note-content');
 let INITIATIVE = null, MEETING = null;
 try { INITIATIVE = require('./demo/initiative'); } catch {}
 try { MEETING = require('./demo/meeting'); } catch {}
@@ -213,7 +215,11 @@ class Orchestrator {
     const STOP = new Set(['cho', 'cua', 'va', 'cac', 'mot', 'nhung', 'theo', 'khi', 'nay', 'duoc', 'tren', 'voi', 'lam', 'ban']);
     const terms = [...new Set(norm(query).split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOP.has(w)))].slice(0, 8);
     const mems = db.prepare('SELECT kind,text FROM memories ORDER BY id DESC LIMIT 5').all().map(m => `(${m.kind}) ${m.text}`);
-    if (!terms.length) return mems.join('\n');
+    // Bộ não thứ 2: truy hồi tri thức liên kết theo đồ thị (làm agent thông minh hơn theo thời gian)
+    let sb = '';
+    try { sb = secondbrain.retrieve(query); } catch (e) { log('sb retrieve: ' + e.message); }
+    const tail = sb ? '\n\n' + sb : '';
+    if (!terms.length) return mems.join('\n') + tail;
     // lấy ứng viên bằng LIKE rồi chấm điểm trong JS
     const like = terms.map(() => 'text LIKE ?').join(' OR ');
     const cand = db.prepare(`SELECT text FROM brain_chunks WHERE ${like} LIMIT 40`).all(...terms.map(t => `%${t}%`));
@@ -223,7 +229,7 @@ class Orchestrator {
       for (const t of terms) { const c = nt.split(t).length - 1; if (c) score += 1 + Math.min(c, 3) * 0.3; }
       return { text: r.text, score };
     }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 3);
-    return [...mems, ...scored.map(r => r.text.slice(0, 450))].join('\n');
+    return [...mems, ...scored.map(r => r.text.slice(0, 450))].join('\n') + tail;
   }
 
   skillTextFor(agent) {
@@ -431,6 +437,8 @@ class Orchestrator {
     let feedback = brief.ceo_feedback ? `Góp ý trực tiếp từ CEO: ${brief.ceo_feedback}` : null;
     let round = task.review_round || 0;
     let lastOutput = null, lastScore = 0;
+    // Prompt hệ thống bất biến theo vòng review (nv/dna/skill/brainSearch không đổi) → tính 1 lần
+    const execSystem = P.agentSystem(nv, dna, this.skillTextFor(nv), this.brainSearch(task.title + ' ' + (brief.muc_tieu || '')));
 
     while (true) {
       /* --- NV thực thi --- */
@@ -440,7 +448,7 @@ class Orchestrator {
       try {
         outText = await this.withRetry(() => this.llm('execute', {
           level: brief.model_boost ? 'tp' : 'nv', agentId: nv.id, missionId: task.mission_id,
-          system: P.agentSystem(nv, dna, this.skillTextFor(nv), this.brainSearch(task.title + ' ' + (brief.muc_tieu || ''))),
+          system: execSystem,
           user: P.execute(brief, feedback, round + 1),
           ctx: { dna, task, round, command: missionCmd, upstream }
         }));
@@ -958,7 +966,24 @@ class Orchestrator {
     this.emit('toast', { title: '📨 COO đã gửi báo cáo', body: `${arts.length} file đính kèm trong Xưởng sản phẩm`, cls: '' });
     db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
       .run('lesson', `Nhiệm vụ "${m.title}" hoàn thành, điểm TB ${avg || '—'}, chi phí ${this.mission(missionId).spent_vnd}đ`, missionId, now());
+    // chỉ chưng cất khi nhiệm vụ THỰC SỰ có thành công — tránh nhồi "bài học giả" đầu độc vòng học
+    if (avg != null && tasks.some(t => t.status === 'done')) this.captureBrain(m, tasks, avg);
     if (this._reporting) this._reporting.delete(missionId);
+  }
+
+  /* Chưng cất 1 note tri thức liên kết từ nhiệm vụ vừa xong (1 lần/mission qua source dedup) */
+  captureBrain(mission, tasks, avg) {
+    try {
+      const dna = this.dna();
+      const deptIds = [...new Set((tasks || []).map(t => t.dept_id).filter(Boolean))];
+      const depts = deptIds.map(d => this.deptName(d)).filter(Boolean);
+      const prodNames = ((dna && dna.products) || []).map(p => p && p.name).filter(Boolean);
+      const hay = ((mission.ceo_command || '') + ' ' + (tasks || []).map(t => t.title).join(' ')).toLowerCase();
+      const products = prodNames.filter(p => hay.includes(String(p).toLowerCase())).slice(0, 3);
+      const gen = noteContent.captureNote(mission, { command: mission.ceo_command, title: mission.title, depts, products, score: avg }, dna);
+      const slug = secondbrain.capture({ title: gen.title, body: gen.body, tags: gen.tags, type: gen.type, source: 'mission:' + mission.id, entities: gen.entities });
+      if (slug) { this.agentLog('coo', `Ghi tri thức mới vào Bộ não thứ 2: "${gen.title}"`, 'g'); this.emit('brain2.new', { slug }); }
+    } catch (e) { log('captureBrain: ' + e.message); }
   }
 
   /* ============ COO CHỦ ĐỘNG — SÁNG KIẾN (Phase 3) ============ */

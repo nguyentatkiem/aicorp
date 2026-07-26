@@ -25,6 +25,15 @@ Lần đầu mở sẽ vào **khảo sát DNA 7 bước** (~5 phút). Bấm "✨
 
 Gói Sub dùng OAuth: SDK gửi `Authorization: Bearer <token>` + header `anthropic-beta: oauth-2025-04-20`. Token lấy từ lệnh `claude setup-token` (cần đã cài Claude Code hoặc CLI Anthropic và có gói Pro/Max).
 
+## Bộ não thứ 2 — tri thức liên kết kiểu Obsidian (v6, 🕸️)
+
+Nâng "trí nhớ phẳng" thành **mạng tri thức sống** để hệ thống chạy hiệu quả hơn theo thời gian:
+
+- **Kho ghi chú `.md` thật, liên kết `[[wikilink]]`** — mỗi ghi chú là một file markdown trong `~/AICORP/workspace/brain/notes/` (**mở trực tiếp bằng Obsidian**). Có backlink hai chiều, thẻ (#tag), tìm kiếm toàn văn FTS5, và **đồ thị lực tương tác** (canvas) đúng kiểu Obsidian.
+- **Agent thông minh dần lên:** trước mỗi việc, agent **truy hồi theo đồ thị** (tìm FTS + mở rộng 1 bước liên kết) để nạp đúng tri thức liên quan; xong mỗi nhiệm vụ, COO **tự chưng cất bài học thành note mới, tự nối `[[thực thể]]`** (sản phẩm, phòng ban, note nền tảng). Càng chạy, bộ não càng dày, việc sau càng chuẩn.
+- **Khai trương là có sẵn mạng nền:** onboarding gieo bộ note liên kết (công ty ↔ từng sản phẩm ↔ khách hàng ↔ giọng thương hiệu ↔ mục tiêu ↔ định vị ↔ cẩm nang nội dung).
+- **Kết nối các điểm (🔗):** gợi ý cặp note chung chủ đề nhưng chưa nối; **note "ma"** cho `[[liên kết]]` chưa tạo (bấm để tạo). Sửa file `.md` ngoài Obsidian rồi bấm **🔄 Nạp lại** để đồng bộ.
+
 ## Doanh nghiệp có khách hàng, tự học, nhiều công ty (v4)
 
 - **CRM sống (🧲):** công ty có khách hàng thật, lead chảy qua phễu (Mới → Ấm → Nóng → Chốt), ticket CSKH và đơn hàng. Duyệt bài đăng → lead đổ về; giao "chấm lead" → đẩy phễu; giao "tư vấn chốt đơn" → **chốt lead nóng thành đơn → doanh thu THẬT**. Buồng lái lấy doanh thu từ đơn hàng thay vì ước lượng.

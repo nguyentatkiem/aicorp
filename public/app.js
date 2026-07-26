@@ -676,6 +676,7 @@ function connectSocket() {
   socket.on('initiative.update', () => { refreshInitiativeBadge(); if ($('#screen-initiatives').classList.contains('active')) refreshInitiatives(); });
   socket.on('crm.update', () => { refreshCRMBadge(); if ($('#screen-crm').classList.contains('active')) debounce('crm', refreshCRM, 500); if ($('#screen-cockpit').classList.contains('active')) debounce('cockpit', refreshCockpit, 600); });
   socket.on('playbook.new', () => { if ($('#screen-hr').classList.contains('active')) refreshPlaybooks(); });
+  socket.on('brain2.new', () => { if ($('#screen-brain2').classList.contains('active')) debounce('b2', () => refreshBrain2(true), 600); });
 }
 const debTimers = {};
 function debounce(key, fn, ms) { clearTimeout(debTimers[key]); debTimers[key] = setTimeout(fn, ms); }
@@ -928,10 +929,12 @@ function switchScreen(name) {
   document.querySelectorAll('.rail-btn').forEach(x => x.classList.toggle('active', x.dataset.screen === name));
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   $('#screen-' + name).classList.add('active');
+  if (name !== 'brain2') b2StopGraph();   // rời màn Bộ não thứ 2 → dừng vòng vẽ đồ thị (tránh rAF chạy nền)
   if (name === 'factory') refreshFactory();
   if (name === 'approvals') refreshApprovals();
   if (name === 'hr') refreshHR();
   if (name === 'brain') refreshBrain();
+  if (name === 'brain2') refreshBrain2();
   if (name === 'connect') refreshConnect();
   if (name === 'settings') loadSettings();
   if (name === 'cockpit') refreshCockpit();
@@ -1184,6 +1187,244 @@ function bindUI() {
     else toast('⚠️ Lỗi', r.error || '', 'red');
     e.target.value = '';
   });
+
+  /* Bộ não thứ 2 — toolbar */
+  $('#b2new').onclick = b2NewNote;
+  $('#b2mode').onclick = b2ToggleGraph;
+  $('#b2suggest').onclick = b2ShowSuggest;
+  $('#b2reindex').onclick = b2Reindex;
+  $('#b2search').addEventListener('input', () => debounce('b2search', () => refreshBrain2(true), 260));
+  // click wikilink / backlink (uỷ quyền sự kiện toàn màn brain2)
+  $('#screen-brain2').addEventListener('click', e => {
+    const wl = e.target.closest('.wl'); if (wl && wl.dataset.wl) { b2OpenByTitle(wl.dataset.wl); return; }
+    const sl = e.target.closest('.b2sidelink'); if (sl) { if (sl.dataset.slug) { b2Open(sl.dataset.slug); return; } if (sl.dataset.wl) { b2OpenByTitle(sl.dataset.wl); return; } }
+    const it = e.target.closest('.b2item'); if (it && it.dataset.slug) b2Open(it.dataset.slug);
+  });
+}
+
+/* ================= BỘ NÃO THỨ 2 (Second Brain kiểu Obsidian) ================= */
+let B2 = { cur: null, notes: [], mode: 'note', graph: null, raf: 0 };
+const B2COLORS = { concept: '#31C97E', decision: '#F6A821', playbook: '#8F7CF6', insight: '#41B7F0', competitor: '#E5484D', sop: '#93A0BC', retro: '#8F7CF6', customer: '#41B7F0', phantom: '#5E6B8C' };
+const B2TYPE = { concept: 'Khái niệm', decision: 'Quyết định', playbook: 'Playbook', insight: 'Insight', competitor: 'Đối thủ', sop: 'Quy trình', retro: 'Bài học', customer: 'Khách hàng' };
+const escAttr = s => esc(s).replace(/"/g, '&quot;');
+const slugifyClient = t => (String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)) || 'note';
+function b2StopGraph() { if (B2.raf) cancelAnimationFrame(B2.raf); B2.raf = 0; if (B2._moveHandler) { window.removeEventListener('mousemove', B2._moveHandler); B2._moveHandler = null; } }
+
+/* Render markdown AN TOÀN: bóc wikilink ra token trước, escape toàn bộ, rồi mới format. */
+function renderMarkdown(md) {
+  const wl = [], code = [];
+  let s = String(md || '').slice(0, 100000);
+  s = s.replace(/```([\s\S]*?)```/g, (m, c) => { const i = code.length; code.push(c); return '@@C' + i + '@@'; });
+  s = s.replace(/\[\[([^\[\]\n|]{1,120})(?:\|([^\[\]\n]{1,120}))?\]\]/g, (m, t, a) => { const i = wl.length; wl.push({ title: t.trim(), label: (a || t).trim() }); return '@@W' + i + '@@'; });
+  let h = esc(s);
+  h = h.replace(/^#### (.*)$/gm, '<h4>$1</h4>').replace(/^### (.*)$/gm, '<h4>$1</h4>').replace(/^## (.*)$/gm, '<h3>$1</h3>').replace(/^# (.*)$/gm, '<h2>$1</h2>');
+  h = h.replace(/^&gt;\s?(.*)$/gm, '<blockquote>$1</blockquote>');
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  h = h.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, t, u) => '<a href="' + escAttr(u) + '" target="_blank" rel="noopener">' + t + '</a>');
+  h = h.replace(/^\s*(?:[-*]|\d+\.) (.*)$/gm, '<li>$1</li>');
+  h = h.replace(/((?:<li>.*?<\/li>\n?)+)/g, m => '<ul>' + m.replace(/\n/g, '') + '</ul>');
+  h = h.replace(/@@W(\d+)@@/g, (m, i) => { const w = wl[+i]; if (!w) return ''; const known = B2.notes.some(n => (n.title && n.title.toLowerCase() === w.title.toLowerCase()) || n.slug === slugifyClient(w.title)); return `<a class="wl${known ? '' : ' phantom'}" data-wl="${escAttr(w.title)}">${esc(w.label)}</a>`; });
+  h = h.replace(/\n{2,}/g, '<br><br>').replace(/\n/g, '<br>');
+  h = h.replace(/@@C(\d+)@@/g, (m, i) => '<pre class="b2code">' + esc(code[+i] || '') + '</pre>');
+  return h;
+}
+
+async function refreshBrain2(keepSel) {
+  const q = ($('#b2search') && $('#b2search').value.trim()) || '';
+  const d = await api('/brain2' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  B2.notes = d.notes || [];
+  $('#b2stats').textContent = `${d.stats.total} ghi chú · ${d.stats.links} liên kết · ${d.stats.orphans} lẻ`;
+  b2RenderList();
+  if (B2.mode === 'graph') { b2DrawGraph(); return; }
+  if (!keepSel || !B2.cur || !B2.notes.some(n => n.slug === B2.cur)) {
+    if (B2.notes.length) b2Open(B2.notes[0].slug);
+    else b2EmptyMain();
+  }
+}
+
+function b2RenderList() {
+  const list = $('#b2list');
+  if (!B2.notes.length) { list.innerHTML = `<div class="psub" style="padding:10px">Chưa có ghi chú nào.<br>Bấm <b>＋ Ghi chú mới</b> hoặc giao việc cho công ty — agent sẽ tự ghi lại bài học.</div>`; return; }
+  list.innerHTML = B2.notes.map(n => `<div class="b2item ${n.slug === B2.cur ? 'active' : ''}" data-slug="${escAttr(n.slug)}">
+     <div class="t">${n.pinned ? '📌 ' : ''}<span style="width:8px;height:8px;border-radius:50%;background:${B2COLORS[n.type] || B2COLORS.concept};display:inline-block;flex:none"></span>${esc(n.title)}</div>
+     <div class="m">${B2TYPE[n.type] || n.type}${n.tags.length ? ' · ' + n.tags.slice(0, 3).map(esc).join(', ') : ''}</div></div>`).join('');
+}
+
+function b2EmptyMain() {
+  B2.cur = null;
+  $('#b2main').innerHTML = `<div class="psub" style="text-align:center;padding:40px 20px">🕸️<br>Chọn một ghi chú bên trái, hoặc tạo ghi chú mới.<br><br>Mỗi ghi chú là một file <b>.md</b> trong <code>~/AICORP/workspace/brain/notes/</code> — mở được bằng Obsidian.</div>`;
+  $('#b2side').innerHTML = '';
+}
+
+async function b2Open(slug) {
+  const v = await api('/brain2/notes/' + encodeURIComponent(slug));
+  if (v.error) { toast('⚠️', v.error, 'red'); return; }
+  B2.cur = v.slug;
+  b2RenderNote(v);
+  document.querySelectorAll('#b2list .b2item').forEach(el => el.classList.toggle('active', el.dataset.slug === v.slug));
+}
+
+async function b2OpenByTitle(title) {
+  // khớp theo TIÊU ĐỀ trước (đúng thứ tự phân giải của server), rồi mới tới slug
+  const byTitle = B2.notes.find(n => n.title && n.title.toLowerCase() === String(title).toLowerCase());
+  if (byTitle) { if (B2.mode === 'graph') b2ToggleGraph(); return b2Open(byTitle.slug); }
+  const slug = slugifyClient(title);
+  if (B2.notes.some(n => n.slug === slug)) { if (B2.mode === 'graph') b2ToggleGraph(); return b2Open(slug); }
+  const v = await api('/brain2/notes/' + encodeURIComponent(slug));
+  if (!v.error) { if (B2.mode === 'graph') b2ToggleGraph(); return b2Open(v.slug); }
+  if (confirm(`Ghi chú "${title}" chưa tồn tại. Tạo mới?`)) {
+    const r = await post('/brain2/notes', { title, body: '', type: 'concept' });
+    if (r.ok) { await refreshBrain2(); if (B2.mode === 'graph') b2ToggleGraph(); b2Open(r.slug); }
+  }
+}
+
+function b2RenderNote(v) {
+  const tagsH = v.tags.map(t => `<span class="b2tag">#${esc(t)}</span>`).join('');
+  $('#b2main').innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <span class="b2typchip" style="color:${B2COLORS[v.type] || B2COLORS.concept}">${B2TYPE[v.type] || v.type}</span>
+      <h3 style="margin:0;flex:1;font-size:16px">${esc(v.title)}</h3>
+      <button class="btn ghost" style="padding:4px 9px" onclick="b2TogglePin('${escAttr(v.slug)}',${v.pinned ? 1 : 0})" title="Ghim">${v.pinned ? '📌' : '📍'}</button>
+      <button class="btn ghost" style="padding:4px 9px" onclick="b2EditNote()">✏️ Sửa</button>
+      <button class="btn ghost" style="padding:4px 9px" onclick="b2DeleteNote('${escAttr(v.slug)}')">🗑</button>
+    </div>
+    <div class="psub" style="margin-bottom:8px">${esc(v.source || '')} · cập nhật ${v.updated_at ? new Date(v.updated_at).toLocaleString('vi-VN') : ''}</div>
+    ${tagsH ? `<div style="margin-bottom:8px">${tagsH}</div>` : ''}
+    <div class="b2body">${v.body ? renderMarkdown(v.body) : '<span class="psub">(ghi chú trống — bấm ✏️ Sửa để viết)</span>'}</div>`;
+  const bl = v.backlinks || [], og = (v.outgoing || []);
+  $('#b2side').innerHTML =
+    `<h4>🔗 Được nhắc tới (${bl.length})</h4>` +
+    (bl.length ? bl.map(b => `<div class="b2sidelink" data-slug="${escAttr(b.slug)}">${esc(b.title)}</div>`).join('') : '<div class="psub">Chưa có note nào trỏ tới.</div>') +
+    `<h4>➡️ Liên kết ra (${og.length})</h4>` +
+    (og.length ? og.map(o => o.resolved
+      ? `<div class="b2sidelink" data-slug="${escAttr(o.to_slug)}">${esc(o.to_title)}</div>`
+      : `<div class="b2sidelink phantom" data-wl="${escAttr(o.to_title)}" title="Note chưa tạo — bấm để tạo">${esc(o.to_title)} <span style="float:right">✎</span></div>`).join('') : '<div class="psub">Chưa liên kết tới note nào.</div>');
+}
+
+function b2Editor(v) {
+  const isNew = !v;
+  v = v || { slug: '', title: '', body: '', type: 'concept', tags: [] };
+  const opts = Object.keys(B2TYPE).map(t => `<option value="${t}" ${v.type === t ? 'selected' : ''}>${B2TYPE[t]}</option>`).join('');
+  $('#b2main').innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <input class="inp" id="b2f_title" placeholder="Tiêu đề ghi chú" value="${escAttr(v.title)}" style="flex:1;font-weight:600">
+      <select class="sel" id="b2f_type" style="width:130px">${opts}</select>
+    </div>
+    <input class="inp" id="b2f_tags" placeholder="thẻ, cách nhau bằng dấu phẩy" value="${escAttr((v.tags || []).join(', '))}" style="margin-bottom:8px">
+    <textarea class="inp" id="b2f_body" rows="16" placeholder="Nội dung markdown… Dùng [[Tên ghi chú]] để liên kết sang note khác." style="font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.6;resize:vertical">${esc(v.body || '')}</textarea>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <button class="btn" onclick="b2SaveNote('${escAttr(v.slug)}')">💾 Lưu</button>
+      <button class="btn ghost" onclick="${isNew ? 'b2CancelNew()' : `b2Open('${escAttr(v.slug)}')`}">Huỷ</button>
+      <span class="psub" style="margin-left:auto">Mẹo: gõ <code>[[</code> tên note để tạo liên kết đồ thị</span>
+    </div>`;
+  setTimeout(() => $('#b2f_title') && $('#b2f_title').focus(), 30);
+}
+async function b2EditNote() { const v = await api('/brain2/notes/' + encodeURIComponent(B2.cur)); if (!v.error) b2Editor(v); }
+window.b2EditNote = b2EditNote;
+function b2NewNote() { b2StopGraph(); B2.mode = 'note'; $('#b2noteview').style.display = ''; $('#b2graphview').style.display = 'none'; $('#b2mode').textContent = '🕸️ Đồ thị'; b2Editor(null); }
+window.b2CancelNew = () => { if (B2.cur) b2Open(B2.cur); else b2EmptyMain(); };
+
+window.b2SaveNote = async (slug) => {
+  const body = {
+    title: $('#b2f_title').value.trim(), type: $('#b2f_type').value,
+    tags: $('#b2f_tags').value, body: $('#b2f_body').value
+  };
+  if (!body.title) { toast('⚠️ Thiếu tiêu đề', 'Ghi chú cần có tiêu đề', 'red'); return; }
+  let r;
+  if (slug) r = await api('/brain2/notes/' + encodeURIComponent(slug), { method: 'PUT', body: JSON.stringify(body) });
+  else r = await post('/brain2/notes', body);
+  if (r.ok) { toast('💾 Đã lưu ghi chú', body.title); await refreshBrain2(true); b2Open(r.slug); }
+  else toast('⚠️ Lỗi', r.error || '', 'red');
+};
+window.b2DeleteNote = async (slug) => {
+  if (!confirm('Xoá ghi chú này? File .md sẽ bị xoá; các liên kết trỏ tới nó trở thành "chưa tạo".')) return;
+  const r = await api('/brain2/notes/' + encodeURIComponent(slug), { method: 'DELETE' });
+  if (r.ok) { toast('🗑 Đã xoá', ''); B2.cur = null; await refreshBrain2(); }
+};
+window.b2TogglePin = async (slug, cur) => {
+  await api('/brain2/notes/' + encodeURIComponent(slug), { method: 'PUT', body: JSON.stringify({ pinned: cur ? 0 : 1 }) });
+  await refreshBrain2(true); b2Open(slug);
+};
+
+async function b2Reindex() {
+  const r = await post('/brain2/reindex', {});
+  if (r.ok) { toast('🔄 Đã nạp lại từ file', `${r.count} ghi chú được đồng bộ`); refreshBrain2(); }
+  else toast('⚠️ Lỗi', r.error || '', 'red');
+}
+
+async function b2ShowSuggest() {
+  const d = await api('/brain2/suggest');
+  if (!d.pairs || !d.pairs.length) { toast('🔗 Chưa có gợi ý', 'Chưa thấy cặp note nào chung chủ đề mà chưa liên kết. Thêm thẻ (#tag) cho các note để nhận gợi ý.'); return; }
+  const lines = d.pairs.map(p => `• "${p.a.title}" ↔ "${p.b.title}"  (chung: ${p.shared.join(', ')})`).join('\n');
+  alert('🔗 Gợi ý nối các điểm (chung ≥2 thẻ nhưng chưa liên kết):\n\n' + lines + '\n\nMở một note rồi thêm [[tên note kia]] để nối chúng lại — đồ thị tri thức sẽ dày hơn.');
+}
+
+/* ---------- Đồ thị lực (canvas) ---------- */
+function b2ToggleGraph() {
+  if (B2.mode === 'graph') {
+    B2.mode = 'note'; $('#b2noteview').style.display = ''; $('#b2graphview').style.display = 'none';
+    $('#b2mode').textContent = '🕸️ Đồ thị'; b2StopGraph();
+    if (B2.cur) b2Open(B2.cur); else if (B2.notes.length) b2Open(B2.notes[0].slug);
+  } else {
+    B2.mode = 'graph'; $('#b2noteview').style.display = 'none'; $('#b2graphview').style.display = '';
+    $('#b2mode').textContent = '📄 Ghi chú'; b2DrawGraph();
+  }
+}
+
+async function b2DrawGraph() {
+  const g = await api('/brain2/graph');
+  const cv = $('#b2canvas'), ctx = cv.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const resize = () => { const w = cv.clientWidth, h = 560; cv.width = w * dpr; cv.height = h * dpr; return { w, h }; };
+  let { w, h } = resize();
+  $('#b2legend').innerHTML = Object.keys(B2TYPE).map(t => `<span style="margin-right:10px"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${B2COLORS[t]};margin-right:3px"></span>${B2TYPE[t]}</span>`).join('') + `<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${B2COLORS.phantom}"></span> chưa tạo</span>`;
+  if (!g.nodes.length) { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#93A0BC'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('Chưa có ghi chú nào để vẽ đồ thị.', w / 2, h / 2); return; }
+  const idx = {}; g.nodes.forEach((n, i) => { idx[n.slug] = i; n.x = w / 2 + Math.cos(i / g.nodes.length * 6.28) * 120 + (i % 7 - 3) * 8; n.y = h / 2 + Math.sin(i / g.nodes.length * 6.28) * 120 + (i % 5 - 2) * 8; n.vx = 0; n.vy = 0; n.r = 5 + Math.min(n.degree || 0, 8) * 1.6; });
+  const edges = g.edges.filter(e => idx[e.from] != null && idx[e.to] != null).map(e => ({ a: idx[e.from], b: idx[e.to] }));
+  let view = { ox: 0, oy: 0, z: 1 }, alpha = 1, drag = null, downPt = null, panning = null;
+
+  const step = () => {
+    const N = g.nodes;
+    for (let i = 0; i < N.length; i++) {
+      for (let j = i + 1; j < N.length; j++) {
+        let dx = N[i].x - N[j].x, dy = N[i].y - N[j].y, d2 = dx * dx + dy * dy || 0.01; const d = Math.sqrt(d2);
+        const f = Math.min(1400 / d2, 12); const fx = dx / d * f, fy = dy / d * f;
+        N[i].vx += fx; N[i].vy += fy; N[j].vx -= fx; N[j].vy -= fy;
+      }
+      N[i].vx += (w / 2 - N[i].x) * 0.002; N[i].vy += (h / 2 - N[i].y) * 0.002;
+    }
+    for (const e of edges) {
+      const A = N[e.a], B = N[e.b]; let dx = B.x - A.x, dy = B.y - A.y, d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+      const f = (d - 78) * 0.02, fx = dx / d * f, fy = dy / d * f;
+      A.vx += fx; A.vy += fy; B.vx -= fx; B.vy -= fy;
+    }
+    for (const n of N) { if (drag && drag.node === n) continue; n.x += n.vx * alpha; n.y += n.vy * alpha; n.vx *= 0.82; n.vy *= 0.82; }
+    alpha *= 0.985; if (alpha < 0.02) alpha = 0.02;
+  };
+  const T = (n) => ({ x: n.x * view.z + view.ox, y: n.y * view.z + view.oy });
+  const draw = () => {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(147,160,188,.22)';
+    for (const e of edges) { const A = T(g.nodes[e.a]), B = T(g.nodes[e.b]); ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y); ctx.stroke(); }
+    for (const n of g.nodes) {
+      const p = T(n), r = n.r * view.z;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 6.2832);
+      ctx.fillStyle = B2COLORS[n.type] || B2COLORS.concept; ctx.globalAlpha = n.phantom ? 0.45 : 1; ctx.fill(); ctx.globalAlpha = 1;
+      if (n.slug === B2.cur) { ctx.lineWidth = 2; ctx.strokeStyle = '#EAEFFA'; ctx.stroke(); }
+      if (g.nodes.length < 46 || (n.degree || 0) >= 2) { ctx.fillStyle = '#EAEFFA'; ctx.font = (11 * Math.min(view.z, 1.4)) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(String(n.title).slice(0, 22), p.x, p.y - r - 4); }
+    }
+  };
+  const loop = () => { step(); draw(); B2.raf = requestAnimationFrame(loop); };
+  cancelAnimationFrame(B2.raf); loop();
+
+  const nodeAt = (mx, my) => { for (const n of g.nodes) { const p = T(n); if ((mx - p.x) ** 2 + (my - p.y) ** 2 <= (n.r * view.z + 4) ** 2) return n; } return null; };
+  const pos = e => { const rc = cv.getBoundingClientRect(); return { x: e.clientX - rc.left, y: e.clientY - rc.top }; };
+  cv.onmousedown = e => { const m = pos(e); downPt = m; const n = nodeAt(m.x, m.y); if (n) { drag = { node: n }; cv.style.cursor = 'grabbing'; } else panning = { x: m.x - view.ox, y: m.y - view.oy }; alpha = Math.max(alpha, 0.5); };
+  if (B2._moveHandler) window.removeEventListener('mousemove', B2._moveHandler);
+  B2._moveHandler = function (e) { if (!drag && !panning) return; const m = pos(e); if (drag) { drag.node.x = (m.x - view.ox) / view.z; drag.node.y = (m.y - view.oy) / view.z; alpha = Math.max(alpha, 0.4); } else if (panning) { view.ox = m.x - panning.x; view.oy = m.y - panning.y; } };
+  window.addEventListener('mousemove', B2._moveHandler);
+  cv.onmouseup = e => { const m = pos(e); if (downPt && Math.hypot(m.x - downPt.x, m.y - downPt.y) < 4) { const n = nodeAt(m.x, m.y); if (n && !n.phantom) { b2ToggleGraph(); b2Open(n.slug); } else if (n && n.phantom) { b2OpenByTitle(n.title); } } drag = null; panning = null; cv.style.cursor = 'grab'; };
+  cv.onwheel = e => { e.preventDefault(); const m = pos(e); const z0 = view.z; view.z = Math.min(2.4, Math.max(0.35, view.z * (e.deltaY < 0 ? 1.1 : 0.9))); view.ox = m.x - (m.x - view.ox) * (view.z / z0); view.oy = m.y - (m.y - view.oy) * (view.z / z0); };
 }
 
 /* ================= ONBOARDING WIZARD (chương 6) ================= */

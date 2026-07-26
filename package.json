@@ -11,6 +11,7 @@
     "test:phase3": "node scripts/test-phase3.js",
     "test:v4": "node scripts/test-v4.js",
     "test:sub": "node scripts/test-sub.js",
+    "test:brain2": "node scripts/test-brain2.js",
     "test:audit": "node scripts/test-audit-fixes.js",
     "test:ui": "node scripts/ui-smoke.js"
   },

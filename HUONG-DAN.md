@@ -13,6 +13,7 @@ Chào bạn! Đây là cẩm nang dùng AICORP — viết cho người **không 
 7. 📦 [Xưởng sản phẩm — nhận file thật](#7-📦-xưởng-sản-phẩm--nhận-file-thật)
 8. 👥 [Quản trị nhân sự AI](#8-👥-quản-trị-nhân-sự-ai)
 9. 🧠 [Company Brain — bộ não công ty](#9-🧠-company-brain--bộ-não-công-ty)
+9b. 🕸️ [Bộ não thứ 2 — mạng tri thức kiểu Obsidian](#9b-🕸️-bộ-não-thứ-2--mạng-tri-thức-kiểu-obsidian)
 10. 🚀 [Tính năng nâng cao](#10-🚀-tính-năng-nâng-cao)
 11. ❓ [Câu hỏi thường gặp](#11-❓-câu-hỏi-thường-gặp)
 
@@ -223,6 +224,18 @@ Bấm biểu tượng 🧠. Đây là nơi lưu mọi hiểu biết chung để 
 - **DNA doanh nghiệp** — toàn bộ khảo sát 7 bước của bạn. Muốn sửa (đổi mục tiêu, thêm sản phẩm…), bấm **✏️ Sửa (làm lại khảo sát)**.
 - **Kho tài liệu** — bấm **＋ Nạp file** để đưa bảng giá, catalogue, quy trình nội bộ… vào (nhận file chữ dạng .txt, .md, .csv). Phần mềm tự chia nhỏ và lập chỉ mục; từ đó khi làm việc, nhân viên sẽ tra đúng số liệu của bạn thay vì đoán mò. Ví dụ: nạp bảng giá xong, bài viết bán hàng sẽ ghi đúng giá từng sản phẩm.
 - **Bộ nhớ dài hạn** — tự đầy lên theo thời gian: quyết định của bạn (duyệt gì, từ chối gì và vì sao), bài học sau mỗi nhiệm vụ. Công ty càng chạy lâu càng "hiểu ý sếp".
+
+---
+
+## 9b. 🕸️ Bộ não thứ 2 — mạng tri thức kiểu Obsidian
+
+Bấm biểu tượng 🕸️. Nếu Company Brain (🧠) là "kho hồ sơ", thì đây là **mạng tri thức sống** giúp công ty ngày càng thông minh:
+
+- **Mỗi ý là một ghi chú, nối nhau bằng `[[liên kết]]`.** Ví dụ ghi chú "Trà đêm An Nhiên" nối tới "Khách hàng mục tiêu" và "Giọng thương hiệu". Bên phải hiện **ai đang nhắc tới ghi chú này** (backlink) — bạn thấy được tri thức liên quan mà không phải tìm.
+- **Xem đồ thị.** Bấm **🕸️ Đồ thị** để thấy toàn bộ tri thức công ty như một mạng sao: chấm to = được nhắc nhiều, màu theo loại; kéo để sắp, lăn chuột để phóng to, bấm một chấm để mở ghi chú.
+- **Công ty tự ghi bài học.** Xong mỗi nhiệm vụ, COO tự tạo một ghi chú "Bài học" và **tự nối** nó với sản phẩm/phòng ban liên quan. Trước khi làm việc mới, nhân viên AI đọc lại đúng những ghi chú liên quan — nên làm càng lâu càng "lành nghề".
+- **Tự viết thêm.** Bấm **＋ Ghi chú mới**, gõ nội dung (hỗ trợ markdown), gõ `[[` rồi tên một ghi chú khác để tạo liên kết. Muốn gợi ý nên nối gì với gì, bấm **🔗 Gợi ý nối**.
+- **Mở được bằng Obsidian thật.** Mọi ghi chú là file `.md` trong thư mục `AICORP/workspace/brain/notes/`. Bạn có thể mở thư mục đó bằng app Obsidian để xem/sửa; sửa xong quay lại AICORP bấm **🔄 Nạp lại** là đồng bộ.
 
 ---
 

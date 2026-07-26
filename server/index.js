@@ -10,6 +10,8 @@ const { db, DIRS, uid, now, getSetting, setSetting, getCredentials, setCredentia
 const { seed, seedSettings, syncSkillsFromSeedDir } = require('./seed');
 const { Orchestrator } = require('./orchestrator');
 const { ICONS } = require('./artifacts');
+const secondbrain = require('./secondbrain');
+const noteContent = require('./demo/note-content');
 const AdmZip = require('adm-zip');
 
 seed();
@@ -78,6 +80,10 @@ app.post('/api/onboarding', (req, res) => {
   }
   (dna.facts || []).forEach(f => db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,NULL,?)').run('fact', f, now()));
   try { require('./crm').seedCustomers(dna, 12); } catch (e) { log('seed customers: ' + e.message); }   // v4: khách hàng nền
+  try { // Bộ não thứ 2: gieo note nền — chỉ TẠO note seed còn thiếu (theo source), KHÔNG đè note đã có
+    const seen = new Set(db.prepare("SELECT source FROM notes WHERE source IS NOT NULL").all().map(r => r.source));
+    noteContent.seedNotes(dna).forEach(n => { if (!seen.has(n.source)) secondbrain.createNote(n); });
+  } catch (e) { log('seed notes: ' + e.message); }
   require('./db').setCompanyName(require('./db').ACTIVE_COMPANY, dna.company.name);                        // v4: tên công ty vào registry
   log('onboarding done: ' + dna.company.name);
   res.json({ ok: true });
@@ -205,6 +211,41 @@ app.get('/api/brain', (req, res) => {
   const memories = db.prepare('SELECT * FROM memories ORDER BY id DESC LIMIT 20').all();
   const dnaRow = db.prepare('SELECT json FROM dna WHERE id=1').get();
   res.json({ docs, memories, dna: dnaRow ? JSON.parse(dnaRow.json) : null });
+});
+
+/* ---------------- BỘ NÃO THỨ 2 (Second Brain kiểu Obsidian) ---------------- */
+app.get('/api/brain2', (req, res) => {
+  res.json({
+    notes: secondbrain.listNotes({ q: req.query.q, tag: req.query.tag, type: req.query.type }),
+    stats: secondbrain.stats(), types: secondbrain.NOTE_TYPES
+  });
+});
+app.get('/api/brain2/graph', (req, res) => res.json(secondbrain.graph()));
+app.get('/api/brain2/suggest', (req, res) => res.json({ pairs: secondbrain.suggestConnections() }));
+app.get('/api/brain2/notes/:slug', (req, res) => {
+  const v = secondbrain.noteView(req.params.slug);
+  if (!v) return res.status(404).json({ error: 'Không tìm thấy ghi chú' });
+  res.json(v);
+});
+app.post('/api/brain2/notes', sameOrigin, (req, res) => {
+  try {
+    const n = secondbrain.createNote({ title: req.body.title, body: req.body.body, tags: req.body.tags, type: req.body.type, source: 'ceo' });
+    orch.emit('brain2.new', { slug: n.slug });
+    res.json({ ok: true, slug: n.slug });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.put('/api/brain2/notes/:slug', sameOrigin, (req, res) => {
+  try {
+    const n = secondbrain.updateNote(req.params.slug, { title: req.body.title, body: req.body.body, tags: req.body.tags, type: req.body.type, pinned: req.body.pinned });
+    res.json({ ok: true, slug: n.slug });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/brain2/notes/:slug', sameOrigin, (req, res) => {
+  res.json({ ok: secondbrain.deleteNote(req.params.slug) });
+});
+app.post('/api/brain2/reindex', sameOrigin, (req, res) => {
+  try { res.json({ ok: true, count: secondbrain.reindexFromDisk() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 /* Làm sạch tên file người dùng tải lên — chống path traversal */
 function safeFilename(name) {
