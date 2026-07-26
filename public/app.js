@@ -7,6 +7,7 @@ const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').re
 const vnd = n => (n || 0).toLocaleString('vi-VN') + 'đ';
 const api = (p, opt) => fetch('/api' + p, opt ? { headers: { 'Content-Type': 'application/json' }, ...opt } : undefined).then(r => r.json());
 const post = (p, body) => api(p, { method: 'POST', body: JSON.stringify(body || {}) });
+const engineLabel = k => k === 'api' ? 'Claude API' : k === 'sub' ? 'Gói Sub' : 'Demo';
 
 let STATE = null, ORG = null, AGENTS = {}, POS = {}, LINES = {}, feed = [], currentDetail = null;
 let activeMission = null, mode = 'ask';
@@ -22,7 +23,7 @@ async function boot() {
   $('#coname').textContent = STATE.company.name;
   $('#coava').textContent = '🌿';
   $('#ceoname').textContent = 'CEO ' + (STATE.company.name.split(' ').slice(-1)[0] || '');
-  $('#enginename').textContent = STATE.engine.kind === 'api' ? 'Claude API' : (STATE.engine.kind === 'sub' ? 'Gói Sub' : 'Demo');
+  $('#enginename').textContent = engineLabel(STATE.engine.kind);
   ORG = await api('/org');
   buildOrg();
   applyView(false);
@@ -487,13 +488,29 @@ async function refreshBrain() {
 /* ================= KẾT NỐI & SKILL ================= */
 async function refreshConnect() {
   const st = await api('/settings');
+  const badge = k => st.engine_kind === k ? '<span class="ftag" style="background:rgba(49,201,126,.12);color:var(--jade);float:right">Đang dùng</span>' : '';
   $('#enginecards').innerHTML = `
-   <div class="wopt ${st.engine_kind === 'api' ? 'on' : ''}" onclick="setEngine('api')"><b>🔑 Claude API ${st.engine_kind === 'api' ? '<span class="ftag" style="background:rgba(49,201,126,.12);color:var(--jade);float:right">Đang dùng</span>' : ''}</b>
-     Trả theo lượng dùng. Gán model theo cấp bậc: COO dùng Opus, Trưởng phòng Sonnet, Nhân viên Haiku — tối ưu chi phí như trả lương thật.<br>
+   <div class="wopt ${st.engine_kind === 'sub' ? 'on' : ''}"><b onclick="setEngine('sub')" style="cursor:pointer">🎫 Gói Sub Claude (Pro/Max) ${badge('sub')}</b>
+     Chạy bằng <b>hạn mức tài khoản Claude Pro/Max</b> của bạn — KHÔNG tính tiền theo lượt như API. Đăng nhập một lần bằng token dài hạn, hệ thống dùng chính quyền của gói sub.<br>
+     <small>${st.hasSubToken ? '<span style="color:var(--jade)">✅ Đã đăng nhập · sẵn sàng chạy</span>' : 'Chưa đăng nhập'}</small>
+     <div style="margin-top:9px" onclick="event.stopPropagation()">
+       <div style="font-size:11.5px;color:var(--muted);line-height:1.5;margin-bottom:6px">
+         <b>Bước 1</b> — mở Terminal, chạy: <code style="background:rgba(0,0,0,.25);padding:1px 6px;border-radius:5px">claude setup-token</code> → đăng nhập tài khoản Claude → copy token (dạng <code>sk-ant-oat01-…</code>).<br>
+         <b>Bước 2</b> — dán token vào ô dưới, bấm <b>Lưu &amp; dùng</b>.</div>
+       <input id="subtokinput" type="password" placeholder="sk-ant-oat01-..." autocomplete="off" spellcheck="false"
+         style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:12px;font-family:monospace">
+       <div style="display:flex;gap:7px;margin-top:7px">
+         <button class="btn" style="padding:6px 14px;font-size:12px" onclick="saveSubToken()">Lưu &amp; dùng</button>
+         <button class="btn ghost" style="padding:6px 14px;font-size:12px" onclick="testSub(false)">Kiểm tra kết nối</button>
+       </div>
+       <div id="substatus" style="font-size:11.5px;margin-top:7px;min-height:16px"></div>
+     </div></div>
+   <div class="wopt ${st.engine_kind === 'api' ? 'on' : ''}" onclick="setEngine('api')"><b>🔑 Claude API ${badge('api')}</b>
+     Trả theo lượng dùng (tính tiền VND từng lượt). Gán model theo cấp bậc: COO dùng Opus, Trưởng phòng Sonnet, Nhân viên Haiku — tối ưu chi phí như trả lương thật.<br>
      <small>${st.hasKey ? '<span style="color:var(--jade)">Đã có key · Kết nối OK</span>' : 'Chưa có key — vào Cài đặt để nhập'}</small></div>
-   <div class="wopt ${st.engine_kind === 'demo' ? 'on' : ''}" onclick="setEngine('demo')"><b>🎬 Chế độ Demo ${st.engine_kind === 'demo' ? '<span class="ftag" style="background:rgba(49,201,126,.12);color:var(--jade);float:right">Đang dùng</span>' : ''}</b>
+   <div class="wopt ${st.engine_kind === 'demo' ? 'on' : ''}" onclick="setEngine('demo')"><b>🎬 Chế độ Demo ${badge('demo')}</b>
      Chạy thử toàn bộ AI Loop không cần key, không tốn tiền — nội dung mô phỏng. Phù hợp để làm quen giao diện.<br>
-     <small>Gói Sub Claude (Pro/Max) qua Agent SDK: sắp ra mắt ở v1</small></div>`;
+     <small>Miễn phí · không gọi mạng</small></div>`;
   const conns = await api('/connections');
   $('#connlist').innerHTML = conns.map(c => `
    <div class="setrow"><div class="sl"><b>${esc(c.name)}</b><span>${esc(c.config?.note || '')}${c.id === 'n8n_webhook' && c.config?.url ? ` · <span style="color:var(--jade)">${esc(c.config.url.slice(0, 40))}</span>` : ''}</span></div>
@@ -505,7 +522,32 @@ async function refreshConnect() {
    <div class="setrow"><div class="sl"><b>🧩 ${esc(s.name)}</b><span>Gắn cho: ${(s.assigned || []).join(', ') || '—'} · ${esc(s.description || '')}</span></div>
    <div class="toggle ${s.enabled ? 'on' : ''}" onclick="toggleSkill('${s.id}',this)"></div></div>`).join('');
 }
-window.setEngine = async k => { await post('/settings', { engine_kind: k }); STATE.engine.kind = k; $('#enginename').textContent = k === 'api' ? 'Claude API' : 'Demo'; refreshConnect(); toast('⚡ Đã đổi engine', k === 'api' ? 'Claude API — chạy thật' : 'Demo — chạy thử miễn phí'); };
+window.setEngine = async k => {
+  if (k === 'sub' && !STATE.engine.hasSubToken) { const s = await api('/settings'); if (!s.hasSubToken) { toast('🎫 Cần đăng nhập gói Sub', 'Chạy `claude setup-token` rồi dán token vào thẻ Gói Sub', 'red'); return; } }
+  await post('/settings', { engine_kind: k }); STATE.engine.kind = k; $('#enginename').textContent = engineLabel(k);
+  refreshConnect();
+  toast('⚡ Đã đổi engine', k === 'api' ? 'Claude API — chạy thật, tính tiền theo lượt' : k === 'sub' ? 'Gói Sub Claude — chạy bằng hạn mức tài khoản' : 'Demo — chạy thử miễn phí');
+};
+window.saveSubToken = async () => {
+  const inp = $('#subtokinput'); const t = (inp?.value || '').trim();
+  const stt = $('#substatus');
+  if (!t) { stt.innerHTML = '<span style="color:var(--red)">Dán token trước đã</span>'; return; }
+  stt.innerHTML = '⏳ Đang lưu & kiểm tra…';
+  const r = await post('/engine/test', { mode: 'sub', subToken: t });
+  if (!r.ok) { stt.innerHTML = `<span style="color:var(--red)">${esc(r.message)}</span>`; return; }
+  await post('/settings', { subToken: t, engine_kind: 'sub' });
+  if (inp) inp.value = '';
+  STATE.engine.kind = 'sub'; STATE.engine.hasSubToken = true;
+  $('#enginename').textContent = 'Gói Sub';
+  toast('🎫 Đã bật Gói Sub Claude', 'Hệ thống chạy bằng hạn mức tài khoản của bạn');
+  refreshConnect();
+};
+window.testSub = async () => {
+  const stt = $('#substatus'); const t = ($('#subtokinput')?.value || '').trim();
+  stt.innerHTML = '⏳ Đang kiểm tra…';
+  const r = await post('/engine/test', { mode: 'sub', subToken: t });
+  stt.innerHTML = `<span style="color:${r.ok ? 'var(--jade)' : 'var(--red)'}">${esc(r.message)}</span>`;
+};
 window.editN8nUrl = async cur => {
   const u = prompt('URL webhook n8n (để trống để xóa):', cur || '');
   if (u === null) return;
@@ -532,7 +574,8 @@ async function loadSettings() {
   $('#set_concurrent').value = s.max_concurrent;
   $('#set_usdvnd').value = s.usd_vnd;
   $('#keystatus').textContent = s.hasKey ? '✅ Đã lưu key (nhập key mới để thay)' : 'Chưa có key';
-  $('#usedtoday').textContent = `Đã dùng hôm nay: ${vnd(STATE.todayVnd)}`;
+  if ($('#substatus2')) $('#substatus2').innerHTML = s.hasSubToken ? '✅ Đã đăng nhập gói Sub (dán token mới để thay)' : 'Chạy <code>claude setup-token</code> để lấy · Chưa đăng nhập';
+  $('#usedtoday').textContent = STATE.engine.kind === 'sub' ? 'Đang chạy bằng hạn mức gói Sub (không tính VND)' : `Đã dùng hôm nay: ${vnd(STATE.todayVnd)}`;
   renderCrons();
 }
 async function saveSettings() {
@@ -547,12 +590,14 @@ async function saveSettings() {
     usd_vnd: +$('#set_usdvnd').value
   };
   if ($('#set_apikey').value.trim()) body.apiKey = $('#set_apikey').value.trim();
+  if ($('#set_subtoken') && $('#set_subtoken').value.trim()) body.subToken = $('#set_subtoken').value.trim();
   await post('/settings', body);
   $('#savestatus').textContent = '✅ Đã lưu!';
   setTimeout(() => $('#savestatus').textContent = '', 2500);
   $('#set_apikey').value = '';
+  if ($('#set_subtoken')) $('#set_subtoken').value = '';
   STATE = await api('/state');
-  $('#enginename').textContent = STATE.engine.kind === 'api' ? 'Claude API' : 'Demo';
+  $('#enginename').textContent = engineLabel(STATE.engine.kind);
   loadSettings();
 }
 
@@ -577,10 +622,17 @@ function flyFile(fromId, icon) {
 async function refreshStats() {
   const s = await api('/stats');
   $('#missioncount').textContent = s.runningMissions;
-  $('#costtoday').textContent = vnd(s.todayVnd);
-  $('#costcap').textContent = ' / trần ' + vnd(s.tranDay);
-  const pct = s.todayVnd / Math.max(s.tranDay, 1);
-  $('#costpill').className = 'top-pill cost-pill' + (pct >= 0.9 ? ' danger' : pct >= 0.7 ? ' warn' : '');
+  if (STATE && STATE.engine && STATE.engine.kind === 'sub') {
+    // Gói Sub: không tính VND — hiện trạng thái hạn mức tài khoản thay vì tiền
+    $('#costtoday').textContent = '🎫 Gói Sub';
+    $('#costcap').textContent = ' · hạn mức tài khoản';
+    $('#costpill').className = 'top-pill cost-pill';
+  } else {
+    $('#costtoday').textContent = vnd(s.todayVnd);
+    $('#costcap').textContent = ' / trần ' + vnd(s.tranDay);
+    const pct = s.todayVnd / Math.max(s.tranDay, 1);
+    $('#costpill').className = 'top-pill cost-pill' + (pct >= 0.9 ? ' danger' : pct >= 0.7 ? ' warn' : '');
+  }
   const badge = $('#apbadge');
   badge.style.display = s.pendingApprovals ? 'flex' : 'none';
   badge.textContent = s.pendingApprovals;
@@ -606,9 +658,11 @@ function connectSocket() {
   });
   socket.on('approval.update', () => { refreshApprovals(); refreshStats(); });
   socket.on('cost.update', d => {
-    $('#costtoday').textContent = vnd(d.todayVnd);
-    const pct = d.todayVnd / Math.max(d.tranDay || 100000, 1);
-    $('#costpill').className = 'top-pill cost-pill' + (pct >= 0.9 ? ' danger' : pct >= 0.7 ? ' warn' : '');
+    if (!(STATE && STATE.engine && STATE.engine.kind === 'sub')) {
+      $('#costtoday').textContent = vnd(d.todayVnd);
+      const pct = d.todayVnd / Math.max(d.tranDay || 100000, 1);
+      $('#costpill').className = 'top-pill cost-pill' + (pct >= 0.9 ? ' danger' : pct >= 0.7 ? ' warn' : '');
+    }
     if (currentDetail === null) debounce('mission2', async () => { await refreshMission(); showMission(); }, 800);
   });
   socket.on('chat.message', d => { cooTyping(false); chatMsg(d.role, d.html); });
@@ -1079,7 +1133,9 @@ function bindUI() {
   $('#savesettings').onclick = saveSettings;
   $('#testkey').onclick = async () => {
     $('#testresult').textContent = 'Đang kiểm tra…';
-    const r = await post('/engine/test', { apiKey: $('#set_apikey').value.trim() });
+    const mode = $('#set_engine').value === 'sub' ? 'sub' : 'api';
+    const body = mode === 'sub' ? { mode, subToken: $('#set_subtoken').value.trim() } : { mode, apiKey: $('#set_apikey').value.trim() };
+    const r = await post('/engine/test', body);
     $('#testresult').textContent = r.message;
     $('#testresult').style.color = r.ok ? 'var(--jade)' : 'var(--red)';
   };
@@ -1162,9 +1218,10 @@ function renderWizard() {
   let body = '';
   if (W.step === 1) body = `
     <h1>⚡ Bước 1 — Kích hoạt engine</h1><div class="wsub">Chọn nguồn sức mạnh cho công ty AI của sếp. Có thể đổi bất cứ lúc nào trong Cài đặt.</div>
-    <div class="wgrid">
+    <div class="wgrid3">
       <div class="wopt ${W.engineKind === 'demo' ? 'on' : ''}" data-ek="demo"><b>🎬 Chạy thử (Demo)</b><small>Không cần key, không tốn tiền. Toàn bộ AI Loop chạy mô phỏng — hợp để làm quen.</small></div>
-      <div class="wopt ${W.engineKind === 'api' ? 'on' : ''}" data-ek="api"><b>🔑 Claude API</b><small>Nhập API key (console.anthropic.com). Chạy thật, trả theo lượng dùng, quy đổi VND.</small></div>
+      <div class="wopt ${W.engineKind === 'sub' ? 'on' : ''}" data-ek="sub"><b>🎫 Gói Sub Claude</b><small>Dùng hạn mức tài khoản Pro/Max của sếp — không tính tiền theo lượt. Đăng nhập bằng token.</small></div>
+      <div class="wopt ${W.engineKind === 'api' ? 'on' : ''}" data-ek="api"><b>🔑 Claude API</b><small>Nhập API key. Chạy thật, trả theo lượng dùng, quy đổi VND.</small></div>
     </div>
     <div class="wfield" id="keyfield" style="margin-top:14px;${W.engineKind === 'api' ? '' : 'display:none'}">
       <label>API key Claude</label>
@@ -1174,6 +1231,15 @@ function renderWizard() {
         <span id="w_testresult" style="font-size:12px"></span>
       </div>
       <div class="hint">Lấy key tại console.anthropic.com → API Keys → Create Key. Key chỉ lưu trên máy sếp (file quyền 600).</div>
+    </div>
+    <div class="wfield" id="subfield" style="margin-top:14px;${W.engineKind === 'sub' ? '' : 'display:none'}">
+      <label>Token gói Sub Claude (Pro/Max)</label>
+      <input class="inp" id="w_subtoken" type="password" placeholder="sk-ant-oat01-…" value="${esc(W.subToken || '')}">
+      <div style="display:flex;gap:9px;align-items:center;margin-top:8px">
+        <button class="btn ghost" id="w_testsub" style="padding:6px 14px">🔍 Kiểm tra kết nối</button>
+        <span id="w_subresult" style="font-size:12px"></span>
+      </div>
+      <div class="hint">Mở Terminal chạy <code>claude setup-token</code> → đăng nhập tài khoản Claude → copy token dán vào đây. Yêu cầu gói Pro hoặc Max. Token chỉ lưu trên máy sếp (file quyền 600).</div>
     </div>`;
   if (W.step === 2) body = `
     <h1>🏢 Bước 2 — Danh thiếp doanh nghiệp</h1><div class="wsub">Vài thông tin cơ bản để cả công ty AI hiểu mình đang làm cho ai. <button class="btn ghost" id="samplebtn" style="padding:4px 10px;font-size:11px">✨ Điền dữ liệu mẫu</button></div>
@@ -1245,8 +1311,15 @@ function renderWizard() {
   };
   const tk = wz.querySelector('#w_testkey');
   if (tk) tk.onclick = async () => {
-    const r = await post('/engine/test', { apiKey: wz.querySelector('#w_apikey').value.trim() });
+    const r = await post('/engine/test', { mode: 'api', apiKey: wz.querySelector('#w_apikey').value.trim() });
     const t = wz.querySelector('#w_testresult');
+    t.textContent = r.message; t.style.color = r.ok ? 'var(--jade)' : 'var(--red)';
+  };
+  const ts = wz.querySelector('#w_testsub');
+  if (ts) ts.onclick = async () => {
+    captureStep();
+    const r = await post('/engine/test', { mode: 'sub', subToken: wz.querySelector('#w_subtoken').value.trim() });
+    const t = wz.querySelector('#w_subresult');
     t.textContent = r.message; t.style.color = r.ok ? 'var(--jade)' : 'var(--red)';
   };
   const back = wz.querySelector('#wback');
@@ -1263,6 +1336,7 @@ function renderWizard() {
 function captureStep() {
   const g = id => { const e = $('#wizard').querySelector('#' + id); return e ? e.value : undefined; };
   if (W.step === 1 && W.engineKind === 'api') W.apiKey = g('w_apikey') ?? W.apiKey;
+  if (W.step === 1 && W.engineKind === 'sub') W.subToken = g('w_subtoken') ?? W.subToken;
   if (W.step === 2) { W.name = g('w_name'); W.industry = g('w_industry'); W.size = g('w_size'); W.region = g('w_region'); }
   if (W.step === 3) { W.products = g('w_products'); W.customers = g('w_customers'); W.goal = g('w_goal'); }
   if (W.step === 4) { W.address = g('w_address'); W.banned = g('w_banned'); }
@@ -1280,7 +1354,7 @@ async function finishWizard() {
     departments_enabled: W.depts,
     facts: []
   };
-  const r = await post('/onboarding', { dna, engine: { kind: W.engineKind, apiKey: W.apiKey || undefined } });
+  const r = await post('/onboarding', { dna, engine: { kind: W.engineKind, apiKey: W.apiKey || undefined, subToken: W.subToken || undefined } });
   if (!r.ok) { toast('⚠️ Lỗi', r.error || 'Không lưu được', 'red'); return; }
   location.reload();
 }

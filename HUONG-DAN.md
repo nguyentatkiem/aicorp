@@ -47,16 +47,19 @@ npm start
 
 Lần đầu mở, phần mềm dẫn bạn qua khảo sát 7 bước (~5 phút) để "hiểu" doanh nghiệp của bạn. Đây là phần quan trọng nhất — điền càng thật, nhân viên AI làm càng đúng ý.
 
-**Bước 1 — Chọn nguồn sức mạnh (engine).** Có 2 lựa chọn, đổi lại được bất cứ lúc nào trong Cài đặt:
+**Bước 1 — Chọn nguồn sức mạnh (engine).** Có 3 lựa chọn, đổi lại được bất cứ lúc nào trong Cài đặt:
 
 | Chế độ | Dành cho ai | Chi phí |
 |---|---|---|
 | 🎬 **Chạy thử (Demo)** | Mới làm quen — mọi thứ chạy y như thật nhưng nội dung là mô phỏng | Miễn phí, không cần đăng ký gì |
-| 🔑 **Claude API** | Dùng thật — nhân viên AI viết nội dung thật cho doanh nghiệp bạn | Trả theo lượng dùng, hiển thị quy đổi ra tiền Việt |
+| 🎫 **Gói Sub Claude (Pro/Max)** | Bạn đã có gói Claude Pro/Max trả tháng — dùng luôn hạn mức đó, khỏi trả thêm | **Không tính tiền theo lượt** — chạy trong hạn mức tài khoản của bạn |
+| 🔑 **Claude API** | Dùng thật, trả theo lượng dùng | Trả theo lượng dùng, hiển thị quy đổi ra tiền Việt |
 
-Cách lấy chìa khóa (API key) cho chế độ Claude API: vào [console.anthropic.com](https://console.anthropic.com) → đăng ký tài khoản → mục **API Keys** → **Create Key** → sao chép dãy ký tự bắt đầu bằng `sk-ant-…` → dán vào ô trong Bước 1. Bấm nút **🔍 Kiểm tra kết nối** để chắc chắn chìa khóa hoạt động. Chìa khóa chỉ lưu trên máy bạn.
+**Cách dùng gói Sub Claude (nếu bạn đã có Pro/Max):** mở **Terminal**, gõ lệnh `claude setup-token` rồi Enter → đăng nhập tài khoản Claude của bạn → chương trình in ra một dãy token bắt đầu bằng `sk-ant-oat01-…` → sao chép dãy đó → quay lại AICORP, dán vào ô **Token gói Sub** ở thẻ 🎫 (màn Kết nối hoặc trong Cài đặt) → bấm **Lưu & dùng**. Xong! Cả công ty AI sẽ chạy bằng hạn mức gói sub của bạn, thanh chi phí đổi thành "🎫 Gói Sub" thay cho tiền Việt. (Cần đã cài sẵn Claude Code hoặc CLI Anthropic trên máy.)
 
-💡 Lời khuyên: lần đầu cứ chọn **Demo** để làm quen, khi thạo rồi hãy chuyển sang Claude API.
+**Cách lấy chìa khóa (API key) cho chế độ Claude API:** vào [console.anthropic.com](https://console.anthropic.com) → đăng ký tài khoản → mục **API Keys** → **Create Key** → sao chép dãy ký tự bắt đầu bằng `sk-ant-…` → dán vào ô trong Bước 1. Bấm nút **🔍 Kiểm tra kết nối** để chắc chắn chìa khóa hoạt động. Chìa khóa chỉ lưu trên máy bạn.
+
+💡 Lời khuyên: lần đầu cứ chọn **Demo** để làm quen. Nếu đã có gói Pro/Max thì **Gói Sub** là rẻ nhất (không tốn thêm tiền). Còn muốn tách bạch chi phí từng việc thì dùng **Claude API**.
 
 **Bước 2 — Danh thiếp doanh nghiệp.** Tên công ty, ngành, quy mô, khu vực. Muốn thử nhanh, bấm nút **✨ Điền dữ liệu mẫu** — phần mềm điền sẵn hồ sơ một công ty trà thảo mộc để bạn khám phá ngay.
 
@@ -268,7 +271,7 @@ Máy cũ: Cài đặt → Sao lưu → **⬇ Xuất** để lấy file `.aicorp`
 Không sao. Vào 🧠 Company Brain → **✏️ Sửa (làm lại khảo sát)** — dữ liệu cũ được điền sẵn, bạn chỉ sửa chỗ cần rồi khai trương lại.
 
 **9. Tôi có gói Claude trả tháng (Pro/Max) — dùng thay API key được không?**
-Phiên bản hiện tại chưa hỗ trợ; tính năng này nằm trong lộ trình bản v1. Hiện có 2 lựa chọn: Demo (miễn phí) và Claude API (trả theo lượng dùng).
+Được rồi nhé! Chọn engine **🎫 Gói Sub Claude**. Mở Terminal chạy `claude setup-token`, đăng nhập, copy token `sk-ant-oat01-…`, dán vào ô Token gói Sub rồi bấm Lưu & dùng. Cả công ty sẽ chạy bằng hạn mức gói sub của bạn, **không tính tiền theo lượt** — thanh chi phí đổi thành "🎫 Gói Sub". Nếu chạm giới hạn phiên của gói sub, hệ thống tự giãn nhịp và báo lại; chờ ít phút hoặc tạm chuyển về Demo/API. (Cần đã cài Claude Code hoặc CLI Anthropic trên máy.)
 
 **10. AI có tự đăng bài hay gửi email khi tôi không biết không?**
 Không bao giờ. Mọi hành động ra thế giới thật đều dừng ở 🔔 Hộp phê duyệt chờ bạn bấm Duyệt. Chưa duyệt thì chưa có gì được gửi đi — bạn luôn là người quyết định cuối cùng.

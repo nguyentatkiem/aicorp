@@ -15,14 +15,15 @@ npm start       # mở http://localhost:3939
 
 Lần đầu mở sẽ vào **khảo sát DNA 7 bước** (~5 phút). Bấm "✨ Điền dữ liệu mẫu" ở bước 2 để thử nhanh.
 
-## Hai chế độ engine
+## Ba chế độ engine
 
 | Chế độ | Mô tả |
 |---|---|
 | **Demo** (mặc định) | Chạy thử toàn bộ AI Loop không cần key, không tốn tiền — planner hiểu lệnh tiếng Việt + 7 module phòng ban sinh sản phẩm nghề thật |
-| **Claude API** | Nhập API key trong Cài đặt → chạy thật. Model theo cấp bậc: COO=Opus, TP=Sonnet, NV=Haiku (đổi được) |
+| **🎫 Gói Sub Claude (Pro/Max)** | Chạy bằng **hạn mức tài khoản Claude Pro/Max** của bạn — KHÔNG tính tiền theo lượt. Đăng nhập một lần bằng token dài hạn (`claude setup-token` → dán vào). Hệ thống ẩn cột chi phí VND, dùng chính quyền của gói sub. |
+| **Claude API** | Nhập API key trong Cài đặt → chạy thật, tính tiền theo lượt. Model theo cấp bậc: COO=Opus, TP=Sonnet, NV=Haiku (đổi được) |
 
-Gói Sub Claude (Pro/Max) qua Agent SDK: lộ trình v2.
+Gói Sub dùng OAuth: SDK gửi `Authorization: Bearer <token>` + header `anthropic-beta: oauth-2025-04-20`. Token lấy từ lệnh `claude setup-token` (cần đã cài Claude Code hoặc CLI Anthropic và có gói Pro/Max).
 
 ## Doanh nghiệp có khách hàng, tự học, nhiều công ty (v4)
 
@@ -78,7 +79,7 @@ server/
   crm.js           CRM sống — khách hàng, lead pipeline, ticket, đơn hàng → doanh thu thật
   learning.js      Vòng học — chưng cất playbook + đánh giá hiệu suất nhân sự
   seed.js          7 phòng ban · 25 agent · nạp skill từ skills-seed/
-  engine.js        EngineProvider kép: ClaudeEngine (API) / DemoEngine (offline, module hóa)
+  engine.js        EngineProvider: ClaudeEngine (API key HOẶC gói Sub OAuth) / DemoEngine (offline, module hóa)
   demo/            planner + 7 module phòng ban + meeting (họp) + initiative (sáng kiến) + gợi ý 12 ngành
   skills-seed/     23 skill chuẩn SKILL.md
   biz.js           Buồng lái kinh doanh — KPI + P&L + trạng thái công ty tích lũy

@@ -15,12 +15,24 @@ function parseJson(text) {
   return JSON.parse(cand || t);
 }
 
+/* Engine Claude thật — chạy bằng API key (kind='api') HOẶC gói Sub qua OAuth (kind='sub').
+   Gói Sub: SDK gửi Authorization: Bearer <oauth-token> + header anthropic-beta oauth — dùng
+   token dài hạn từ lệnh `claude setup-token` (yêu cầu tài khoản Claude Pro/Max). */
 class ClaudeEngine {
-  constructor(getKey) { this.getKey = getKey; this.kind = 'api'; }
-  async call(kind, p) {
-    const key = this.getKey();
+  constructor(credsGetter, kind) { this.credsGetter = credsGetter; this.kind = kind || 'api'; }
+  client() {
+    const c = this.credsGetter() || {};
+    if (this.kind === 'sub') {
+      const token = c.subToken;
+      if (!token) throw new Error('Chưa đăng nhập gói Sub. Chạy `claude setup-token` trong Terminal rồi dán token vào mục Kết nối.');
+      return new Anthropic({ authToken: token, defaultHeaders: { 'anthropic-beta': 'oauth-2025-04-20' } });
+    }
+    const key = c.apiKey;
     if (!key) throw new Error('Chưa có API key. Vào Cài đặt → nhập key Claude API.');
-    const client = new Anthropic({ apiKey: key });
+    return new Anthropic({ apiKey: key });
+  }
+  async call(kind, p) {
+    const client = this.client();
     const res = await client.messages.create({
       model: p.model,
       max_tokens: p.maxTokens || 4000,
@@ -240,12 +252,12 @@ class DemoEngine {
   }
 }
 
-function makeEngine(kindGetter, keyGetter) {
+function makeEngine(kindGetter, credsGetter) {
   return {
     get kind() { return kindGetter(); },
     async call(kind, p) {
       const k = kindGetter();
-      const impl = (k === 'api' || k === 'sub') ? new ClaudeEngine(keyGetter) : new DemoEngine();
+      const impl = (k === 'api' || k === 'sub') ? new ClaudeEngine(credsGetter, k) : new DemoEngine();
       return impl.call(kind, p);
     }
   };

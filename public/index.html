@@ -207,8 +207,10 @@
         <div class="grid2">
           <div class="card">
             <h3>🎛️ Engine &amp; model theo cấp bậc</h3>
-            <div class="setrow"><div class="sl"><b>Chế độ engine</b><span>Demo = chạy thử không tốn tiền · Claude API = chạy thật</span></div>
-              <select class="sel" id="set_engine"><option value="demo">Demo (miễn phí)</option><option value="api">Claude API</option></select></div>
+            <div class="setrow"><div class="sl"><b>Chế độ engine</b><span>Demo = miễn phí · Gói Sub = hạn mức tài khoản Pro/Max · API = tính tiền theo lượt</span></div>
+              <select class="sel" id="set_engine"><option value="demo">Demo (miễn phí)</option><option value="sub">Gói Sub Claude (Pro/Max)</option><option value="api">Claude API</option></select></div>
+            <div class="setrow"><div class="sl"><b>Token gói Sub</b><span id="substatus2">Chạy <code>claude setup-token</code> để lấy · Chưa đăng nhập</span></div>
+              <input class="inp" id="set_subtoken" type="password" placeholder="sk-ant-oat01-…" autocomplete="off" style="width:170px"></div>
             <div class="setrow"><div class="sl"><b>API key Claude</b><span id="keystatus">Chưa có key</span></div>
               <input class="inp" id="set_apikey" type="password" placeholder="sk-ant-…" style="width:170px"></div>
             <div class="setrow"><div class="sl"><b>Kiểm tra kết nối</b><span id="testresult">&nbsp;</span></div>

@@ -38,7 +38,13 @@ class Orchestrator {
     this.active = new Map();          // taskId -> true (đang chạy)
     this.engine = makeEngine(
       () => getSetting('engine_kind', 'demo'),
-      () => getCredentials().anthropic_api_key || process.env.ANTHROPIC_API_KEY
+      () => {
+        const c = getCredentials();
+        return {
+          apiKey: c.anthropic_api_key || process.env.ANTHROPIC_API_KEY,
+          subToken: c.claude_oauth_token || process.env.ANTHROPIC_AUTH_TOKEN
+        };
+      }
     );
     setInterval(() => this.tick().catch(e => log('tick error: ' + e.message)), 3000);
     setInterval(() => { try { this.runCronCheck(); } catch (e) { log('cron error: ' + e.message); } }, 30000);
@@ -133,7 +139,8 @@ class Orchestrator {
   }
 
   addCost(missionId, agentId, model, inTok, outTok) {
-    const vnd = this.vndOf(model, inTok, outTok);
+    // Gói Sub: dùng hạn mức tài khoản, không quy đổi VND
+    const vnd = this.isSub() ? 0 : this.vndOf(model, inTok, outTok);
     db.prepare('INSERT INTO cost_logs(mission_id,agent_id,model,input_tokens,output_tokens,vnd,at) VALUES(?,?,?,?,?,?,?)')
       .run(missionId, agentId, model, inTok, outTok, vnd, now());
     if (missionId) db.prepare('UPDATE missions SET spent_vnd=spent_vnd+? WHERE id=?').run(vnd, missionId);
@@ -145,11 +152,15 @@ class Orchestrator {
 
   estimateNext(model) { return this.vndOf(model, 5000, 2000); }
 
+  isSub() { return getSetting('engine_kind', 'demo') === 'sub'; }
+
   budgetOk(missionId, model) {
     const m = this.mission(missionId);
     if (!m) return false;
     // mission bị CEO tạm dừng / đã chạm trần → mọi lượt gọi đang bay phải dừng ngay
     if (['paused', 'over_budget', 'failed'].includes(m.status)) return false;
+    // Gói Sub: chạy bằng hạn mức tài khoản, KHÔNG tính trần VND (đặc tả 8.1)
+    if (this.isSub()) return true;
     const est = this.estimateNext(model);
     const reserved = this.reservedVnd(missionId);
     if (m.spent_vnd + reserved + est > (m.budget_vnd || Infinity)) { this.overBudget(m, 'trần nhiệm vụ'); return false; }
@@ -1166,10 +1177,14 @@ function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&
 
 function friendlyError(e) {
   const msg = e.message || String(e);
-  if (/401|invalid.*key|authentication/i.test(msg)) return 'API key không đúng hoặc hết hạn';
-  if (/429|rate.limit/i.test(msg)) return 'Chạm giới hạn tốc độ API — em sẽ giãn nhịp';
+  const sub = getSetting('engine_kind', 'demo') === 'sub';
+  if (/gói Sub|setup-token/i.test(msg)) return msg.slice(0, 160); // đã là thông báo hướng dẫn sẵn
+  if (/401|invalid.*key|oauth|authentication/i.test(msg))
+    return sub ? 'Token gói Sub không đúng/hết hạn — chạy lại `claude setup-token` trong Cài đặt' : 'API key không đúng hoặc hết hạn';
+  if (/429|rate.limit|overloaded/i.test(msg))
+    return sub ? 'Gói Sub chạm giới hạn phiên — em giãn nhịp, thử lại sau ít phút' : 'Chạm giới hạn tốc độ API — em sẽ giãn nhịp';
   if (/ENOTFOUND|ECONN|fetch failed|network/i.test(msg)) return 'Không kết nối được mạng/API';
-  if (/credit|billing/i.test(msg)) return 'Tài khoản API hết hạn mức';
+  if (/credit|billing/i.test(msg)) return sub ? 'Gói Sub hết hạn mức phiên này' : 'Tài khoản API hết hạn mức';
   return msg.slice(0, 160);
 }
 

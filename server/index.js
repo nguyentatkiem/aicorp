@@ -45,13 +45,15 @@ app.get('/api/state', (req, res) => {
   const company = db.prepare('SELECT * FROM company WHERE id=1').get() || null;
   const dnaRow = db.prepare('SELECT * FROM dna WHERE id=1').get();
   const kind = getSetting('engine_kind', 'demo');
-  const hasKey = !!(getCredentials().anthropic_api_key || process.env.ANTHROPIC_API_KEY);
+  const creds = getCredentials();
+  const hasKey = !!(creds.anthropic_api_key || process.env.ANTHROPIC_API_KEY);
+  const hasSubToken = !!(creds.claude_oauth_token || process.env.ANTHROPIC_AUTH_TOKEN);
   const pending = db.prepare("SELECT COUNT(*) c FROM approvals WHERE status='pending'").get().c;
   const running = db.prepare("SELECT COUNT(*) c FROM missions WHERE status IN ('briefing','planning','running','waiting_approval','reporting')").get().c;
   res.json({
     onboarded: !!(company && dnaRow),
     company, dna: dnaRow ? JSON.parse(dnaRow.json) : null,
-    engine: { kind, hasKey },
+    engine: { kind, hasKey, hasSubToken },
     pendingApprovals: pending, runningMissions: running,
     todayVnd: orch.todayVnd(), tranDay: getSetting('tran_per_day', 100000)
   });
@@ -72,6 +74,7 @@ app.post('/api/onboarding', (req, res) => {
   if (engine) {
     if (engine.kind) setSetting('engine_kind', engine.kind);
     if (engine.apiKey) setCredentials({ anthropic_api_key: engine.apiKey.trim() });
+    if (engine.subToken) setCredentials({ claude_oauth_token: engine.subToken.trim() });
   }
   (dna.facts || []).forEach(f => db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,NULL,?)').run('fact', f, now()));
   try { require('./crm').seedCustomers(dna, 12); } catch (e) { log('seed customers: ' + e.message); }   // v4: khách hàng nền
@@ -259,28 +262,42 @@ app.get('/api/settings', (req, res) => {
     max_review_rounds: getSetting('max_review_rounds'), max_concurrent: getSetting('max_concurrent'),
     tran_per_mission: getSetting('tran_per_mission'), tran_per_day: getSetting('tran_per_day'),
     usd_vnd: getSetting('usd_vnd'), models: getSetting('models'), pricing: getSetting('pricing'),
-    hasKey: !!(getCredentials().anthropic_api_key || process.env.ANTHROPIC_API_KEY)
+    hasKey: !!(getCredentials().anthropic_api_key || process.env.ANTHROPIC_API_KEY),
+    hasSubToken: !!(getCredentials().claude_oauth_token || process.env.ANTHROPIC_AUTH_TOKEN)
   });
 });
 app.post('/api/settings', (req, res) => {
   const allow = ['engine_kind', 'nguong_diem', 'max_review_rounds', 'max_concurrent', 'tran_per_mission', 'tran_per_day', 'usd_vnd', 'models', 'pricing'];
   for (const k of allow) if (req.body[k] !== undefined) setSetting(k, req.body[k]);
   if (req.body.apiKey) setCredentials({ anthropic_api_key: String(req.body.apiKey).trim() });
+  if (req.body.subToken) setCredentials({ claude_oauth_token: String(req.body.subToken).trim() });
   res.json({ ok: true });
 });
 app.post('/api/engine/test', async (req, res) => {
-  const key = (req.body.apiKey || '').trim() || getCredentials().anthropic_api_key || process.env.ANTHROPIC_API_KEY;
-  if (!key) return res.json({ ok: false, message: 'Chưa nhập API key' });
+  const Anthropic = require('@anthropic-ai/sdk');
+  const models = getSetting('models');
+  const mode = req.body.mode === 'sub' ? 'sub' : 'api';
   try {
-    const Anthropic = require('@anthropic-ai/sdk');
-    const client = new Anthropic({ apiKey: key });
-    const models = getSetting('models');
+    let client;
+    if (mode === 'sub') {
+      // Gói Sub: token OAuth từ `claude setup-token` (Bearer + header oauth beta)
+      const token = (req.body.subToken || '').trim() || getCredentials().claude_oauth_token || process.env.ANTHROPIC_AUTH_TOKEN;
+      if (!token) return res.json({ ok: false, message: 'Chưa có token gói Sub. Chạy `claude setup-token` rồi dán token vào.' });
+      client = new Anthropic({ authToken: token, defaultHeaders: { 'anthropic-beta': 'oauth-2025-04-20' } });
+    } else {
+      const key = (req.body.apiKey || '').trim() || getCredentials().anthropic_api_key || process.env.ANTHROPIC_API_KEY;
+      if (!key) return res.json({ ok: false, message: 'Chưa nhập API key' });
+      client = new Anthropic({ apiKey: key });
+    }
     await client.messages.create({ model: models.nv, max_tokens: 16, messages: [{ role: 'user', content: 'ping' }] });
-    res.json({ ok: true, message: '✅ Kết nối Claude API thành công!' });
+    res.json({ ok: true, message: mode === 'sub' ? '✅ Kết nối gói Sub Claude thành công!' : '✅ Kết nối Claude API thành công!' });
   } catch (e) {
-    const msg = /401|auth/i.test(e.message) ? 'API key không đúng hoặc hết hạn'
-      : /credit|billing/i.test(e.message) ? 'Tài khoản hết hạn mức — nạp thêm tại console.anthropic.com'
-      : /ENOTFOUND|fetch failed/i.test(e.message) ? 'Không kết nối được mạng' : e.message.slice(0, 140);
+    const raw = String((e && e.message) || '');
+    const msg = mode === 'sub' && /401|oauth|auth/i.test(raw) ? 'Token gói Sub không đúng hoặc đã hết hạn — chạy lại `claude setup-token`'
+      : /401|auth/i.test(raw) ? 'API key không đúng hoặc hết hạn'
+      : /429|rate|limit/i.test(raw) ? (mode === 'sub' ? 'Gói Sub đang chạm giới hạn phiên — thử lại sau ít phút' : 'Chạm giới hạn tốc độ — thử lại sau')
+      : /credit|billing/i.test(raw) ? 'Tài khoản hết hạn mức — nạp thêm tại console.anthropic.com'
+      : /ENOTFOUND|fetch failed/i.test(raw) ? 'Không kết nối được mạng' : raw.slice(0, 140);
     res.json({ ok: false, message: '❌ ' + msg });
   }
 });

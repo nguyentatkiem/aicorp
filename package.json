@@ -10,6 +10,7 @@
     "test": "node scripts/test-full.js",
     "test:phase3": "node scripts/test-phase3.js",
     "test:v4": "node scripts/test-v4.js",
+    "test:sub": "node scripts/test-sub.js",
     "test:audit": "node scripts/test-audit-fixes.js",
     "test:ui": "node scripts/ui-smoke.js"
   },
