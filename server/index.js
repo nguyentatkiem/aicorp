@@ -494,6 +494,35 @@ app.patch('/api/connections/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+/* ---------------- PHASE 3: BUỒNG LÁI KINH DOANH ---------------- */
+const biz = require('./biz');
+app.get('/api/cockpit', (req, res) => {
+  const dnaRow = db.prepare('SELECT json FROM dna WHERE id=1').get();
+  res.json(biz.cockpit(dnaRow ? JSON.parse(dnaRow.json) : null));
+});
+
+/* ---------------- PHASE 3: SÁNG KIẾN CHỦ ĐỘNG CỦA COO ---------------- */
+app.get('/api/initiatives', (req, res) => {
+  const st = req.query.status || 'pending';
+  res.json(db.prepare('SELECT * FROM initiatives WHERE status=? ORDER BY created_at DESC LIMIT 30').all(st));
+});
+app.post('/api/initiatives/:id/decide', async (req, res) => {
+  res.json(await orch.decideInitiative(req.params.id, !!req.body.accept));
+});
+app.post('/api/initiatives/check', async (req, res) => {
+  res.json({ ok: true, count: await orch.runInitiativeCheck(true) });
+});
+
+/* ---------------- PHASE 3: CUỘC HỌP CHIẾN LƯỢC ---------------- */
+app.get('/api/meetings/:id', (req, res) => {
+  const m = db.prepare('SELECT * FROM meetings WHERE id=?').get(req.params.id);
+  if (!m) return res.status(404).json({ error: 'Không có cuộc họp này' });
+  res.json({ ...m, perspectives: safeJson(m.perspectives_json), synthesis: safeJson(m.synthesis_json) });
+});
+app.get('/api/meetings', (req, res) => {
+  res.json(db.prepare('SELECT id, mission_id, topic, created_at FROM meetings ORDER BY created_at DESC LIMIT 20').all());
+});
+
 function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
 
 io.on('connection', socket => {

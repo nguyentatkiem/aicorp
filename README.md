@@ -24,6 +24,17 @@ Lần đầu mở sẽ vào **khảo sát DNA 7 bước** (~5 phút). Bấm "✨
 
 Gói Sub Claude (Pro/Max) qua Agent SDK: lộ trình v2.
 
+## Công ty SỐNG (Phase 3 — v3)
+
+Biến AICORP từ "chạy nhiệm vụ" thành **doanh nghiệp đang vận hành**:
+
+- **Bàn giao dữ liệu giữa các phòng:** output task trước chảy vào brief task sau — Tài chính lập dự toán → Kinh doanh dùng đúng số đó làm báo giá → Marketing bám số liệu thật. Các phòng cộng tác thật, không còn rời rạc.
+- **COO chủ động (initiative engine):** COO tự rà tình hình và đề xuất việc nên làm — phản ứng khi đối thủ giảm giá, giữ nhịp khi lâu chưa có việc, nhắc việc chờ duyệt, đề xuất đào tạo lại nhân sự điểm thấp. CEO bấm "Đồng ý" là thành nhiệm vụ. Màn **💡 Sáng kiến**.
+- **Buồng lái kinh doanh (🎛️):** KPI + P&L dự phóng tích lũy qua từng nhiệm vụ (doanh thu, lợi nhuận, chi phí AI như chi phí vận hành thật, lead pipeline, chiến dịch, tiến độ mục tiêu 3 tháng), nhịp hoạt động 6 tuần, dòng sự kiện kinh doanh.
+- **Họp chiến lược đa agent:** lệnh quyết định ("có nên… không") → COO triệu tập trưởng phòng, mỗi người nêu góc nhìn riêng (Marketing đẩy mạnh, Tài chính cảnh báo hòa vốn…), tranh luận thật → COO tổng hợp 2-3 phương án → CEO chọn → ghi vào bộ nhớ để mọi phòng áp dụng thống nhất.
+- **Hành động thật local:** duyệt gửi mail → sinh **file .eml** mở bằng Mail/Outlook; duyệt đăng bài/đặt lịch → sinh **file .ics** mở bằng Lịch. Thật, cục bộ, không gọi dịch vụ ngoài.
+- **RAG cải tiến:** tìm tài liệu theo độ trùng khớp (bỏ dấu + tần suất) thay vì chỉ khớp chuỗi thô.
+
 ## Năng lực (bản làm sâu — v2)
 
 **AI Loop trọn vòng:** giao → brief-back (mode Hỏi kỹ) → phân rã WBS theo ý định lệnh → thực thi song song (3 phiên) → review chấm điểm ngưỡng 90 → trả lại tối đa 3 vòng → escalate CEO (chấp nhận / **làm lại bằng model mạnh hơn** / hủy) → báo cáo tổng hợp.
@@ -57,15 +68,16 @@ Gói Sub Claude (Pro/Max) qua Agent SDK: lộ trình v2.
 
 ```
 server/
-  db.js            SQLite (better-sqlite3) — schema chương 3 · dữ liệu tại ~/AICORP/
+  db.js            SQLite (better-sqlite3) — schema chương 3 + Phase 3 · dữ liệu tại ~/AICORP/
   seed.js          7 phòng ban · 25 agent · nạp skill từ skills-seed/
   engine.js        EngineProvider kép: ClaudeEngine (API) / DemoEngine (offline, module hóa)
-  demo/            planner + 7 module năng lực phòng ban + gợi ý nhiệm vụ 12 ngành
-  skills-seed/     19+ skill chuẩn SKILL.md
-  prompts.js       Template chương 12
-  orchestrator.js  State machine ch5 + budget guard + approval gate + n8n + cron + DM + resume
-  artifacts.js     Xuất docx/xlsx/pptx/html/md
-  index.js         REST API + static + WebSocket (quy ước 2.4)
+  demo/            planner + 7 module phòng ban + meeting (họp) + initiative (sáng kiến) + gợi ý 12 ngành
+  skills-seed/     23 skill chuẩn SKILL.md
+  biz.js           Buồng lái kinh doanh — KPI + P&L + trạng thái công ty tích lũy
+  prompts.js       Template chương 12 (+ bàn giao dữ liệu upstream)
+  orchestrator.js  State machine ch5 + budget + approval + n8n + cron + DM + handoff + meeting + initiative + resume
+  artifacts.js     Xuất docx/xlsx/pptx/html/md + .eml/.ics (hành động thật)
+  index.js         REST API + static + WebSocket (quy ước 2.4) + cockpit/initiatives/meetings
 public/            UI 1 trang bám demo chuẩn (sơ đồ sống, chat, War Room, Xưởng, Phê duyệt, HR, Brain, Kết nối, Cài đặt, Wizard)
 scripts/
   smoke.js         Smoke test nghiệm thu nhanh
@@ -84,8 +96,9 @@ AICORP_NO_OPEN=1 AICORP_HOME=/tmp/aicorp-test npm start
 # cửa sổ 2 — các bộ test
 npm run smoke        # nghiệm thu nhanh (~3 phút)
 npm test             # 40 test tích hợp toàn tính năng (~10 phút)
+npm run test:phase3  # 21 test công ty sống (handoff, buồng lái, họp, sáng kiến, .eml/.ics)
 npm run test:audit   # 9 test hồi quy các lỗi audit đã vá
 npm run test:ui      # UI test Chrome headless (cần Google Chrome)
 ```
 
-Kết quả mới nhất: **smoke ✓ · full 40/40 ✓ · audit-fix 9/9 ✓ · UI smoke ✓**.
+Kết quả mới nhất: **smoke ✓ · full 40/40 ✓ · phase3 21/21 ✓ · audit-fix 9/9 ✓ · UI smoke ✓**. Qua 2 vòng audit đối kháng (30 + 13 lỗi thật đã vá).

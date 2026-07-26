@@ -163,8 +163,13 @@ function demoExecuteSmart(ctx) {
       const brief = typeof t.brief === 'string' ? JSON.parse(t.brief || '{}') : (t.brief || {});
       const fn = mod.outputs[t.assignee_id] || mod.outputs.default;
       if (fn) {
-        const md = fn(brief, { dna: ctx.dna, round: ctx.round || 0, command: ctx.command || '', task: t });
-        if (md && md.length > 100) return '```output\n' + md + '\n```';
+        let md = fn(brief, { dna: ctx.dna, round: ctx.round || 0, command: ctx.command || '', task: t, upstream: ctx.upstream || [] });
+        if (md && md.length > 100) {
+          // phản ánh việc BÀN GIAO DỮ LIỆU: ghi rõ đã dựa trên số liệu phòng khác
+          const up = ctx.upstream || [];
+          if (up.length) md += `\n\n---\n_Nguồn tham chiếu: đã kế thừa dữ liệu bàn giao từ ${up.map(u => u.dept).join(', ')} (${up.map(u => '"' + u.title + '"').join(', ')}) để bảo đảm số liệu/nội dung khớp nhau giữa các phòng._`;
+          return '```output\n' + md + '\n```';
+        }
       }
     } catch (e) { /* fallback */ }
   }

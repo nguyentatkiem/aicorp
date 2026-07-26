@@ -30,7 +30,9 @@ async function boot() {
   await Promise.all([loadChats(), refreshTasks(), refreshStats(), refreshMission()]);
   bindUI();
   showMission();
+  refreshInitiativeBadge();
   setInterval(refreshStats, 15000);
+  setInterval(refreshInitiativeBadge, 30000);
   setInterval(ambient, 7000);
 }
 
@@ -421,11 +423,13 @@ async function refreshApprovals() {
     : '<div class="card" style="color:var(--muted)">✨ Không có việc nào chờ duyệt. Khi agent muốn đăng bài/gửi mail/chi tiền, thẻ phê duyệt sẽ xuất hiện ở đây.</div>';
 }
 window.decide = async (id, key) => {
-  const decision = key === 'approve' || key === 'accept' ? 'approve' : (key === 'drop' ? 'drop' : 'reject');
+  // Giữ NGUYÊN key cho phương án họp (A/B/C) và escalate (retry_strong, accept, drop) — chỉ 'reject' mới hỏi lý do
+  const known = ['approve', 'accept', 'drop', 'reject', 'retry_strong'];
+  const decision = known.includes(key) ? key : key;   // A/B/C và mọi option key khác → gửi nguyên
   let note = null;
   if (decision === 'reject') note = prompt('Lý do từ chối (để nhân viên rút kinh nghiệm):') || '';
-  await post(`/approvals/${id}/decide`, { decision: key === 'accept' ? 'accept' : decision, note });
-  refreshApprovals(); refreshTasks();
+  await post(`/approvals/${id}/decide`, { decision, note });
+  refreshApprovals(); refreshTasks(); refreshInitiativeBadge();
 };
 
 /* ================= NHÂN SỰ ================= */
@@ -589,7 +593,10 @@ function connectSocket() {
   socket.on('review.score', d => showScore(d.agentId, d.score, d.pass));
   socket.on('task.update', () => { debounce('tasks', refreshTasks, 400); });
   socket.on('mission.update', d => { debounce('mission', async () => { await refreshMission(); if (currentDetail === null) showMission(); updateMissionBar(); refreshStats(); }, 300); });
-  socket.on('artifact.new', d => { flyFile(d.agentId, d.icon); debounce('factory', refreshFactory, 500); });
+  socket.on('artifact.new', d => {
+    flyFile(d.agentId, d.icon); debounce('factory', refreshFactory, 500);
+    if ($('#screen-cockpit').classList.contains('active')) debounce('cockpit', refreshCockpit, 800);
+  });
   socket.on('approval.new', d => {
     refreshApprovals(); refreshStats();
     // không đè modal CEO đang mở (đang soạn DM / sửa nội dung…) — chỉ nhắc bằng toast
@@ -609,6 +616,8 @@ function connectSocket() {
     ORG = await api('/org'); buildOrg(); applyView(false);
     if ($('#screen-hr').classList.contains('active')) refreshHR();
   });
+  socket.on('initiative.new', () => { refreshInitiativeBadge(); if ($('#screen-initiatives').classList.contains('active')) refreshInitiatives(); });
+  socket.on('initiative.update', () => { refreshInitiativeBadge(); if ($('#screen-initiatives').classList.contains('active')) refreshInitiatives(); });
 }
 const debTimers = {};
 function debounce(key, fn, ms) { clearTimeout(debTimers[key]); debTimers[key] = setTimeout(fn, ms); }
@@ -867,6 +876,84 @@ function switchScreen(name) {
   if (name === 'brain') refreshBrain();
   if (name === 'connect') refreshConnect();
   if (name === 'settings') loadSettings();
+  if (name === 'cockpit') refreshCockpit();
+  if (name === 'initiatives') refreshInitiatives();
+}
+
+/* ================= BUỒNG LÁI KINH DOANH (Phase 3) ================= */
+function fmtVnd(n) {
+  const a = Math.abs(n || 0);
+  if (a >= 1e9) return (n / 1e9).toFixed(1).replace('.', ',') + ' tỷ';
+  if (a >= 1e6) return Math.round(n / 1e6).toLocaleString('vi-VN') + ' tr';
+  return (n || 0).toLocaleString('vi-VN') + 'đ';
+}
+async function refreshCockpit() {
+  const c = await api('/cockpit');
+  const k = c.kpi;
+  const maxTrend = Math.max(1, ...c.trend.map(t => t.missions));
+  $('#cockpitbody').innerHTML = `
+   <div class="kpi-row">
+     <div class="kpi-tile pos"><div class="kv">${fmtVnd(k.projectedRevenue)}</div><div class="kl">Doanh thu dự phóng / tháng</div><div class="ks">giá TB ${fmtVnd(k.price)}/sản phẩm</div></div>
+     <div class="kpi-tile ${k.opProfit >= 0 ? 'pos' : 'neg'}"><div class="kv">${fmtVnd(k.opProfit)}</div><div class="kl">Lợi nhuận hoạt động dự phóng</div><div class="ks">sau giá vốn + chi phí AI</div></div>
+     <div class="kpi-tile info"><div class="kv">${k.campaigns}</div><div class="kl">Chiến dịch đã lên lịch</div><div class="ks">${k.contentPieces} nội dung đã sản xuất</div></div>
+     <div class="kpi-tile info"><div class="kv">${k.leadCount}</div><div class="kl">Lead trong pipeline</div><div class="ks">giá trị deal ${fmtVnd(k.dealValue)}</div></div>
+     <div class="kpi-tile warn"><div class="kv">${fmtVnd(k.aiCostMonth)}</div><div class="kl">Chi phí vận hành AI / tháng</div><div class="ks">tổng lũy kế ${fmtVnd(k.aiCostTotal)}</div></div>
+     <div class="kpi-tile pos"><div class="kv">${k.avgQuality || '—'}</div><div class="kl">Điểm chất lượng TB</div><div class="ks">${k.missionsDone} nhiệm vụ · ${k.artifacts} sản phẩm</div></div>
+   </div>
+   <div class="grid2">
+     <div class="card"><h3>📊 P&amp;L dự phóng (tháng)</h3>
+       <table class="pnl-table">${c.pnl.map(r => `<tr class="${r.kind === 'sub' ? 'sub' : r.kind === 'negsub' ? 'negsub' : ''}"><td>${esc(r.row)}</td><td class="num ${r.value >= 0 ? 'pos' : 'neg'}">${r.value < 0 ? '(' + fmtVnd(-r.value) + ')' : fmtVnd(r.value)}</td></tr>`).join('')}</table>
+       <div style="font-size:10.5px;color:var(--dim);margin-top:10px">Số liệu dự phóng từ hoạt động công ty (dự toán tài chính, lead, chiến dịch) + chi phí AI thực. Càng giao việc, bức tranh càng rõ.</div>
+     </div>
+     <div class="card"><h3>📈 Nhịp hoạt động 6 tuần</h3>
+       <div class="trend-wrap">${c.trend.map(t => `<div class="trend-col">
+         <div class="trend-val">${t.missions}</div>
+         <div class="trend-bar-wrap"><div class="trend-bar" style="height:${Math.round(t.missions / maxTrend * 100)}%"></div></div>
+         <div class="trend-lbl">${esc(t.label)}</div></div>`).join('')}</div>
+       <div style="font-size:11px;color:var(--muted);margin-top:6px">Số nhiệm vụ hoàn thành mỗi tuần</div>
+       ${c.goal ? `<div style="margin-top:14px"><div style="font-size:12px;font-weight:600">🎯 Mục tiêu 3 tháng: ${esc(c.goal)}</div>
+         <div class="goalbar"><i style="width:${k.goalProgress}%"></i></div>
+         <div style="font-size:11px;color:var(--muted)">Tiến độ ước tính ${k.goalProgress}%</div></div>` : ''}
+     </div>
+   </div>
+   <div class="card"><h3>🧾 Dòng sự kiện kinh doanh</h3>
+     ${c.events.length ? c.events.map(e => `<div class="setrow"><div class="sl"><b>${bizIcon(e.kind)} ${esc(e.label)}</b>
+       <span>${new Date(e.at).toLocaleString('vi-VN')}${e.amount_vnd ? ' · ' + fmtVnd(e.amount_vnd) : ''}</span></div></div>`).join('')
+       : '<div style="color:var(--muted);font-size:12px">Chưa có sự kiện. Giao việc cho công ty để buồng lái bắt đầu ghi nhận.</div>'}
+   </div>`;
+}
+function bizIcon(k) { return { revenue: '💰', deal: '🤝', lead: '🎯', content: '✍️', campaign: '📣', email: '✉️', research: '🔍', decision: '🗳️' }[k] || '•'; }
+
+/* ================= SÁNG KIẾN CHỦ ĐỘNG ================= */
+async function refreshInitiatives() {
+  const [pending, done] = await Promise.all([api('/initiatives?status=pending'), Promise.all([api('/initiatives?status=accepted'), api('/initiatives?status=dismissed')])]);
+  const hist = [...done[0], ...done[1]].sort((a, b) => (b.decided_at || '').localeCompare(a.decided_at || '')).slice(0, 15);
+  const typ = { co_hoi: ['💡', 'Cơ hội'], rui_ro: ['⚠️', 'Rủi ro'], dinh_ky: ['📆', 'Định kỳ'], nhan_su: ['🎓', 'Nhân sự'] };
+  $('#initiativelist').innerHTML = pending.length ? pending.map(p => {
+    const [ic, tn] = typ[p.loai] || ['💡', ''];
+    return `<div class="ini-card ${p.loai}">
+     <div class="it">${ic} ${esc(p.title)} <span class="ityp">${tn}</span></div>
+     <div class="ir">${esc(p.ly_do || '')}<br><span style="color:var(--dim)">→ Nếu đồng ý, em sẽ giao: "${esc(p.command)}"</span></div>
+     <div style="display:flex;gap:9px">
+       <button class="btn jade" onclick="decideIni('${p.id}',true)">✔ Đồng ý — giao việc ngay</button>
+       <button class="btn ghost" onclick="decideIni('${p.id}',false)">Bỏ qua</button>
+     </div></div>`;
+  }).join('') : '<div class="card" style="color:var(--muted)">✨ Chưa có sáng kiến nào đang chờ. COO sẽ tự đề xuất khi rà thấy cơ hội/rủi ro, hoặc bấm "Nhờ COO rà soát ngay".</div>';
+  $('#initiativehist').innerHTML = hist.length ? hist.map(p => {
+    const [ic] = typ[p.loai] || ['💡'];
+    return `<div class="setrow"><div class="sl"><b>${ic} ${esc(p.title)}</b><span>${p.status === 'accepted' ? '✅ Đã đồng ý' : '⏭ Đã bỏ qua'} · ${p.decided_at ? new Date(p.decided_at).toLocaleDateString('vi-VN') : ''}</span></div></div>`;
+  }).join('') : '<div style="color:var(--muted);font-size:12px">Chưa có.</div>';
+}
+window.decideIni = async (id, accept) => {
+  const r = await post(`/initiatives/${id}/decide`, { accept });
+  if (r.ok && accept) { toast('🚀 Đã giao việc từ sáng kiến', 'Theo dõi trên Sơ đồ sống'); switchScreen('home'); }
+  refreshInitiatives(); refreshInitiativeBadge();
+};
+async function refreshInitiativeBadge() {
+  const p = await api('/initiatives?status=pending');
+  const b = $('#inibadge');
+  b.style.display = p.length ? 'flex' : 'none';
+  b.textContent = p.length;
 }
 function bindUI() {
   document.querySelectorAll('.rail-btn').forEach(b => b.addEventListener('click', () => switchScreen(b.dataset.screen)));
@@ -924,6 +1011,13 @@ function bindUI() {
     e.target.value = '';
     refreshConnect();
   });
+  $('#ini_check').onclick = async () => {
+    $('#ini_check').textContent = 'Đang rà soát…';
+    const r = await post('/initiatives/check', {});
+    $('#ini_check').textContent = '🔄 Nhờ COO rà soát ngay';
+    toast(r.count ? '💡 COO vừa đề xuất' : 'COO đã rà soát', r.count ? `${r.count} sáng kiến mới` : 'Hiện chưa có việc mới đáng đề xuất', r.count ? 'amber' : '');
+    refreshInitiatives(); refreshInitiativeBadge();
+  };
   $('#importfile').addEventListener('change', async e => {
     const f = e.target.files[0]; if (!f) return;
     if (!confirm(`Khôi phục từ "${f.name}" sẽ GHI ĐÈ toàn bộ dữ liệu hiện tại và app sẽ tự thoát. Tiếp tục?`)) { e.target.value = ''; return; }

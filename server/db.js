@@ -73,6 +73,15 @@ CREATE TABLE IF NOT EXISTS dms (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id T
   text TEXT, at TEXT);
 CREATE TABLE IF NOT EXISTS crons (id TEXT PRIMARY KEY, title TEXT, command TEXT, mode TEXT,
   cadence TEXT, hhmm TEXT, dow INTEGER, enabled INTEGER DEFAULT 1, last_run_at TEXT, last_run_local TEXT, created_at TEXT);
+-- Phase 3: buồng lái kinh doanh (sự kiện kinh doanh tích lũy)
+CREATE TABLE IF NOT EXISTS biz_events (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT,
+  label TEXT, amount_vnd INTEGER DEFAULT 0, meta_json TEXT, source_mission TEXT, at TEXT);
+-- Phase 3: sáng kiến chủ động của COO
+CREATE TABLE IF NOT EXISTS initiatives (id TEXT PRIMARY KEY, title TEXT, command TEXT, ly_do TEXT,
+  phong TEXT, loai TEXT, status TEXT DEFAULT 'pending', created_at TEXT, decided_at TEXT);
+-- Phase 3: cuộc họp chiến lược
+CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, mission_id TEXT, topic TEXT,
+  perspectives_json TEXT, synthesis_json TEXT, created_at TEXT);
 `);
 
 /* Migrate cột thêm sau (bỏ qua nếu đã có) */

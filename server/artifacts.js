@@ -111,7 +111,46 @@ h1{color:#E4711E}h2{color:#26304A;border-bottom:2px solid #F6A821;padding-bottom
 </head><body><h1>${esc(title)}</h1>\n${body}\n<hr><small>Tạo bởi AICORP · ${new Date().toLocaleString('vi-VN')}</small></body></html>`);
 }
 
-const ICONS = { docx: '📄', xlsx: '📊', pptx: '🖥️', html: '📈', md: '📝', pdf: '📕' };
+const ICONS = { docx: '📄', xlsx: '📊', pptx: '🖥️', html: '📈', md: '📝', pdf: '📕', eml: '✉️', ics: '📅' };
+
+/* Hành động thật dạng file local mở được ngay (Phase 3):
+   .eml = thư nháp mở bằng Mail/Outlook · .ics = sự kiện lịch mở bằng Calendar */
+function foldHeader(v) { return String(v || '').replace(/[\r\n]+/g, ' ').slice(0, 200); }
+
+async function buildEml({ to, subject, body }) {
+  const fp = path.join(DIRS.artifacts, 'thu-' + slugify(subject || 'nhap') + '-' + Date.now().toString(36) + '.eml');
+  const b = Buffer.from(String(body || ''), 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
+  const eml = [
+    'From: AICORP <noreply@aicorp.local>',
+    'To: ' + foldHeader(to || 'khach-hang@example.com'),
+    'Subject: =?UTF-8?B?' + Buffer.from(foldHeader(subject || 'Thư từ công ty'), 'utf8').toString('base64') + '?=',
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    'X-AICORP-Draft: 1',
+    '', b, ''
+  ].join('\r\n');
+  fs.writeFileSync(fp, eml);
+  return { fileName: path.basename(fp), absPath: fp, type: 'eml' };
+}
+
+function icsEscape(s) { return String(s || '').replace(/\r/g, '').replace(/([,;\\])/g, '\\$1').replace(/\n/g, '\\n'); }
+async function buildIcs({ title, description, whenIso, durationMin }) {
+  const start = whenIso ? new Date(whenIso) : new Date(Date.now() + 86400000);
+  const end = new Date(start.getTime() + (durationMin || 60) * 60000);
+  const fmt = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const fp = path.join(DIRS.artifacts, 'lich-' + slugify(title || 'su-kien') + '-' + Date.now().toString(36) + '.ics');
+  const ics = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//AICORP//VN', 'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT', 'UID:' + Date.now() + '@aicorp.local', 'DTSTAMP:' + fmt(new Date()),
+    'DTSTART:' + fmt(start), 'DTEND:' + fmt(end),
+    'SUMMARY:' + icsEscape(title || 'Sự kiện công ty'),
+    'DESCRIPTION:' + icsEscape(description || ''),
+    'END:VEVENT', 'END:VCALENDAR'
+  ].join('\r\n');
+  fs.writeFileSync(fp, ics);
+  return { fileName: path.basename(fp), absPath: fp, type: 'ics' };
+}
 
 /** Sinh file artifact; trả {fileName, absPath, type} — lỗi thì fallback .md */
 async function buildArtifact({ title, content, format, version, taskId }) {
@@ -136,4 +175,4 @@ async function buildArtifact({ title, content, format, version, taskId }) {
   }
 }
 
-module.exports = { buildArtifact, ICONS, slugify };
+module.exports = { buildArtifact, buildEml, buildIcs, ICONS, slugify };

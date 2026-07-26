@@ -290,4 +290,35 @@ textarea.inp{background:var(--panel2);border:1px solid var(--line2);border-radiu
 .dept-preview .dp{font-size:11px;border:1px solid var(--line2);border-radius:9px;padding:4px 10px;color:var(--muted)}
 .dept-preview .dp.on{border-color:var(--jade);color:var(--jade)}
 
+/* ===== BUỒNG LÁI KINH DOANH (Phase 3) ===== */
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.kpi-tile{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px 16px;position:relative;overflow:hidden}
+.kpi-tile::after{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.kpi-tile.pos::after{background:var(--jade)}.kpi-tile.warn::after{background:var(--amber)}.kpi-tile.neg::after{background:var(--red)}.kpi-tile.info::after{background:var(--cyan)}
+.kpi-tile .kv{font-size:22px;font-weight:800;font-family:'JetBrains Mono',monospace;line-height:1.1}
+.kpi-tile .kl{font-size:11px;color:var(--muted);margin-top:5px}
+.kpi-tile .ks{font-size:10.5px;color:var(--dim);margin-top:3px}
+.pnl-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.pnl-table td{padding:9px 12px;border-bottom:1px solid var(--line)}
+.pnl-table td.num{text-align:right;font-family:'JetBrains Mono',monospace}
+.pnl-table tr.sub td{font-weight:700;border-top:1px solid var(--line2)}
+.pnl-table tr.sub td.num{color:var(--jade)}
+.pnl-table tr.negsub td.num{color:var(--red)}
+.pnl-table td.pos{color:var(--jade)}.pnl-table td.neg{color:var(--muted)}
+.trend-wrap{display:flex;align-items:flex-end;gap:10px;height:120px;padding:8px 0}
+.trend-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;height:100%}
+.trend-bar-wrap{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center}
+.trend-bar{width:70%;max-width:38px;background:linear-gradient(180deg,var(--amber),#E4711E);border-radius:5px 5px 0 0;min-height:3px;transition:height .5s}
+.trend-lbl{font-size:9.5px;color:var(--muted);text-align:center;white-space:nowrap}
+.trend-val{font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.goalbar{height:9px;background:var(--panel3);border-radius:5px;overflow:hidden;margin:8px 0}
+.goalbar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),var(--jade));border-radius:5px;transition:width .6s}
+
+/* ===== SÁNG KIẾN ===== */
+.ini-card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:13px;padding:15px 17px;margin-bottom:12px}
+.ini-card.rui_ro{border-left-color:var(--red)}.ini-card.dinh_ky{border-left-color:var(--violet)}.ini-card.nhan_su{border-left-color:var(--cyan)}
+.ini-card .it{font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
+.ini-card .ir{color:var(--muted);font-size:12px;margin:6px 0 11px;line-height:1.55}
+.ini-card .ityp{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:700;background:var(--panel3);color:var(--muted)}
+
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

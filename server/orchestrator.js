@@ -6,7 +6,11 @@ const path = require('path');
 const { db, uid, now, getSetting, setSetting, getCredentials, log } = require('./db');
 const { makeEngine, parseJson } = require('./engine');
 const P = require('./prompts');
-const { buildArtifact, ICONS } = require('./artifacts');
+const { buildArtifact, buildEml, buildIcs, ICONS } = require('./artifacts');
+const biz = require('./biz');
+let INITIATIVE = null, MEETING = null;
+try { INITIATIVE = require('./demo/initiative'); } catch {}
+try { MEETING = require('./demo/meeting'); } catch {}
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -36,6 +40,8 @@ class Orchestrator {
     );
     setInterval(() => this.tick().catch(e => log('tick error: ' + e.message)), 3000);
     setInterval(() => { try { this.runCronCheck(); } catch (e) { log('cron error: ' + e.message); } }, 30000);
+    // COO chủ động: rà trạng thái công ty & đề xuất sáng kiến định kỳ (Phase 3)
+    setInterval(() => this.runInitiativeCheck().catch(e => log('initiative error: ' + e.message)), 90000);
   }
 
   /* Danh bạ agent đang bật (dùng cho planner + brief) */
@@ -179,14 +185,24 @@ class Orchestrator {
     } finally { release(); }
   }
 
+  /* RAG-lite cải tiến (Phase 3): chấm điểm chunk theo độ trùng từ khóa (bỏ dấu) + tần suất,
+     không chỉ LIKE. Trả các đoạn liên quan NHẤT thay vì 3 đoạn ngẫu nhiên khớp. */
   brainSearch(query) {
-    const words = (query || '').split(/\s+/).filter(w => w.length > 3).slice(0, 5);
-    if (!words.length) return '';
-    const like = words.map(() => 'text LIKE ?').join(' OR ');
-    const rows = db.prepare(`SELECT text FROM brain_chunks WHERE ${like} LIMIT 3`).all(...words.map(w => `%${w}%`));
-    const mems = db.prepare('SELECT kind,text FROM memories ORDER BY id DESC LIMIT 5').all()
-      .map(m => `(${m.kind}) ${m.text}`);
-    return [...mems, ...rows.map(r => r.text.slice(0, 400))].join('\n');
+    const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
+    const STOP = new Set(['cho', 'cua', 'va', 'cac', 'mot', 'nhung', 'theo', 'khi', 'nay', 'duoc', 'tren', 'voi', 'lam', 'ban']);
+    const terms = [...new Set(norm(query).split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOP.has(w)))].slice(0, 8);
+    const mems = db.prepare('SELECT kind,text FROM memories ORDER BY id DESC LIMIT 5').all().map(m => `(${m.kind}) ${m.text}`);
+    if (!terms.length) return mems.join('\n');
+    // lấy ứng viên bằng LIKE rồi chấm điểm trong JS
+    const like = terms.map(() => 'text LIKE ?').join(' OR ');
+    const cand = db.prepare(`SELECT text FROM brain_chunks WHERE ${like} LIMIT 40`).all(...terms.map(t => `%${t}%`));
+    const scored = cand.map(r => {
+      const nt = norm(r.text);
+      let score = 0;
+      for (const t of terms) { const c = nt.split(t).length - 1; if (c) score += 1 + Math.min(c, 3) * 0.3; }
+      return { text: r.text, score };
+    }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 3);
+    return [...mems, ...scored.map(r => r.text.slice(0, 450))].join('\n');
   }
 
   skillTextFor(agent) {
@@ -238,8 +254,13 @@ class Orchestrator {
     return this.runPlanning(missionId, text);
   }
 
-  async runPlanning(missionId, answers) {
+  async runPlanning(missionId, answers, opts) {
     const m = this.mission(missionId);
+    // Lệnh chiến lược (có/không/nên/quyết định…) → HỌP đa agent thay vì chia task (Phase 3)
+    if (!(opts && opts.fromMeeting) && MEETING && this.isStrategic(m.ceo_command)) {
+      this.typing(false);
+      return this.runMeeting(missionId);
+    }
     this.setMission(missionId, 'planning');
     this.typing(true);
     this.setAgent('coo', 'work', 'Chia task · xếp dependency · chọn người phù hợp…');
@@ -350,6 +371,19 @@ class Orchestrator {
     }
   }
 
+  /* Gom output của các task phụ thuộc đã hoàn thành → đầu vào cho task hiện tại */
+  upstreamOutputs(task) {
+    const deps = JSON.parse(task.deps_json || '[]');
+    const out = [];
+    for (const d of deps) {
+      const dt = db.prepare('SELECT title, dept_id, output_ref, status FROM tasks WHERE id=?').get(d);
+      if (dt && dt.status === 'done' && dt.output_ref) {
+        out.push({ title: dt.title, dept: this.deptName(dt.dept_id), excerpt: dt.output_ref.slice(0, 1800) });
+      }
+    }
+    return out;
+  }
+
   /* ---------- TASK lifecycle (5.2) ---------- */
   async runTask(task) {
     const nguong = getSetting('nguong_diem', 90);
@@ -360,9 +394,13 @@ class Orchestrator {
     const dna = this.dna();
     const missionCmd = (this.mission(task.mission_id) || {}).ceo_command || '';
 
+    // BÀN GIAO DỮ LIỆU (Phase 3): gom output các task phụ thuộc đã xong làm đầu vào thật
+    const upstream = this.upstreamOutputs(task);
+    if (upstream.length) brief.dau_vao_tu_phong_khac = upstream.map(u => `[${u.dept} · ${u.title}]\n${u.excerpt}`);
+
     this.setTask(task, 'doing');
     this.packet(tp.id, nv.id, 'gold');
-    this.setAgent(nv.id, 'think', `Nhận brief: ${task.title}`);
+    this.setAgent(nv.id, 'think', upstream.length ? `Nhận brief + dữ liệu ${upstream.length} phòng bàn giao: ${task.title}` : `Nhận brief: ${task.title}`);
     await sleep(900);
 
     let feedback = brief.ceo_feedback ? `Góp ý trực tiếp từ CEO: ${brief.ceo_feedback}` : null;
@@ -379,7 +417,7 @@ class Orchestrator {
           level: brief.model_boost ? 'tp' : 'nv', agentId: nv.id, missionId: task.mission_id,
           system: P.agentSystem(nv, dna, this.skillTextFor(nv), this.brainSearch(task.title + ' ' + (brief.muc_tieu || ''))),
           user: P.execute(brief, feedback, round + 1),
-          ctx: { dna, task, round, command: missionCmd }
+          ctx: { dna, task, round, command: missionCmd, upstream }
         }));
       } catch (e) {
         if (e.message === 'OVER_BUDGET') {
@@ -501,8 +539,30 @@ class Orchestrator {
       this.setAgent(nv.id, 'done', `Xong: ${task.title} (${score}/100)`);
       this.packet(tp.id, 'coo', 'jade');
       this.emit('toast', { title: '📄 File mới vào Xưởng', body: `${task.title} · ${score}/100`, cls: '' });
+      this.recordBiz(task, nv.id);
     }
     setTimeout(() => this.setAgent(nv.id, 'idle'), 2500);
+  }
+
+  /* Ghi sổ kinh doanh khi 1 task hoàn thành → buồng lái tiến hóa (Phase 3) */
+  recordBiz(task, agentId) {
+    try {
+      // chỉ ghi 1 lần cho mỗi task (chống nhân đôi doanh thu khi task làm lại nhiều vòng/accept)
+      if (this._bizRecorded && this._bizRecorded.has(task.id)) return;
+      if (!this._bizRecorded) this._bizRecorded = new Set();
+      this._bizRecorded.add(task.id);
+      const dna = this.dna();
+      const price = biz.avgPrice(dna);
+      const map = {
+        nv_cash: () => biz.record('revenue', `Dự toán tài chính: ${task.title}`, Math.round(price * 400), null, task.mission_id),
+        nv_quote: () => biz.record('deal', `Báo giá/hợp đồng: ${task.title}`, Math.round(price * 50 * 10), null, task.mission_id),
+        nv_lead: () => biz.record('lead', `Chấm & lọc lead: ${task.title}`, 20, null, task.mission_id),
+        nv_content: () => biz.record('content', `Nội dung: ${task.title}`, 0, null, task.mission_id),
+        nv_ads: () => biz.record('content', `Kịch bản quảng cáo: ${task.title}`, 0, null, task.mission_id),
+        nv_market: () => biz.record('research', `Nghiên cứu thị trường: ${task.title}`, 0, null, task.mission_id)
+      };
+      (map[agentId] || (() => {}))();
+    } catch (e) { log('recordBiz err: ' + e.message); }
   }
 
   /* Sinh lại artifact phiên bản mới (dùng khi CEO sửa nội dung trước khi duyệt) */
@@ -520,6 +580,45 @@ class Orchestrator {
     if (noteText) db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
       .run('decision', `${noteText}: "${task.title}"`, task.mission_id, now());
     return artId;
+  }
+
+  /* Sinh file hành động thật local (.eml/.ics) + ghi sổ kinh doanh khi CEO duyệt (Phase 3) */
+  async emitRealArtifact(ap, task) {
+    try {
+      const action = ap.action_json ? JSON.parse(ap.action_json) : null;
+      if (!action) return;
+      const dna = this.dna();
+      const output = task.output_ref || '';
+      let art = null;
+      if (action.channel === 'mcp:gmail') {
+        art = await buildEml({
+          to: 'khach-hang@example.com',
+          subject: task.title,
+          body: output.slice(0, 6000) + '\n\n— Gửi từ ' + (((dna || {}).company || {}).name || 'công ty') + ' qua AICORP'
+        });
+        biz.record('email', `Thư gửi khách: ${task.title}`, 0, null, task.mission_id);
+      } else if (action.channel === 'mcp:facebook') {
+        // ghi sổ CHIẾN DỊCH đã lên lịch đăng
+        biz.record('campaign', `Bài đăng Fanpage: ${task.title}`, 0, { note: action.note }, task.mission_id);
+        // kèm file lịch nhắc đăng (mở bằng Calendar)
+        art = await buildIcs({
+          title: 'Đăng bài: ' + task.title,
+          description: (action.note || '') + '\n\n' + output.slice(0, 800),
+          whenIso: null, durationMin: 15
+        });
+      } else if (action.channel === 'n8n' || /lich|calendar|hen|họp|meeting/i.test(action.op || '')) {
+        art = await buildIcs({ title: task.title, description: output.slice(0, 800), whenIso: null, durationMin: 60 });
+      }
+      if (art) {
+        const artId = uid('art');
+        db.prepare(`INSERT INTO artifacts(id,mission_id,task_id,agent_id,name,type,path,version,score,created_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?)`)
+          .run(artId, task.mission_id, task.id, task.assignee_id, art.fileName, art.type, art.absPath,
+            db.prepare('SELECT COUNT(*) c FROM artifacts WHERE task_id=?').get(task.id).c + 1, task.score, now());
+        this.emit('artifact.new', { artifactId: artId, name: art.fileName, icon: ICONS[art.type] || '📎', agentId: task.assignee_id, score: task.score });
+        this.emit('toast', { title: '📎 File hành động thật đã tạo', body: art.fileName + ' — mở bằng ứng dụng Mail/Lịch', cls: '' });
+      }
+    } catch (e) { log('emitRealArtifact err: ' + e.message); }
   }
 
   /* Bắn n8n webhook thật khi CEO duyệt hành động thật (8.3) */
@@ -634,6 +733,28 @@ class Orchestrator {
   async decideApproval(approvalId, decision, note, editedText) {
     const ap = db.prepare('SELECT * FROM approvals WHERE id=?').get(approvalId);
     if (!ap || ap.status !== 'pending') return { ok: false, error: 'Approval không tồn tại hoặc đã quyết' };
+
+    // HỌP CHIẾN LƯỢC: CEO chọn 1 phương án (key A/B/C) — hợp lệ nếu khớp option của chính approval này
+    const apOpts = (() => { try { return JSON.parse(ap.options_json || '[]'); } catch { return []; } })();
+    const apAction = (() => { try { return JSON.parse(ap.action_json || 'null'); } catch { return null; } })();
+    if (ap.type === 'decision' && apAction && apAction.meetingId && apOpts.some(o => o.key === decision)) {
+      const chosen = apOpts.find(o => o.key === decision);
+      db.prepare('UPDATE approvals SET status=?, decided_at=? WHERE id=?').run('approved', now(), approvalId);
+      this.emit('approval.update', { approvalId, status: 'approved' });
+      const tk = db.prepare('SELECT * FROM tasks WHERE id=?').get(ap.task_id);
+      if (tk) { this.setTask(tk, 'done'); db.prepare('UPDATE tasks SET done_at=?, score=? WHERE id=?').run(now(), null, tk.id); }
+      db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
+        .run('decision', `CEO chọn phương án "${chosen.label}" cho: ${ap.title.replace('🗳️ Quyết định chiến lược: ', '')}`, ap.mission_id, now());
+      biz.record('decision', `Chốt chiến lược: ${chosen.label}`, 0, null, ap.mission_id);
+      this.chat('coo', `✅ Sếp đã chốt <b>${esc(chosen.label)}</b>. Em ghi vào bộ nhớ công ty để mọi phòng áp dụng thống nhất từ giờ ạ.`, ap.mission_id);
+      this.setAgent('coo', 'idle');
+      // mission họp chỉ có task khung → đóng THẲNG về done (không sinh báo cáo COO thừa)
+      db.prepare('UPDATE missions SET report_html=? WHERE id=?')
+        .run(`<ul><li>🗳️ Cuộc họp chiến lược đã chốt: <b>${esc(chosen.label)}</b></li></ul>`, ap.mission_id);
+      if (this.mission(ap.mission_id).status !== 'done') this.setMission(ap.mission_id, 'done', { progress: 100 });
+      return { ok: true };
+    }
+
     // Approval Gate KHÔNG fail-open: decision lạ → từ chối xử lý, tuyệt đối không tự duyệt
     const VALID = ['approve', 'accept', 'edited', 'reject', 'drop', 'retry_strong'];
     if (!VALID.includes(decision)) return { ok: false, error: 'Quyết định không hợp lệ: ' + String(decision).slice(0, 30) };
@@ -656,7 +777,9 @@ class Orchestrator {
         this.setAgent('coo', 'work', 'CEO đã duyệt — chuyển lệnh cho kênh thực thi');
         this.emit('toast', { title: '✅ Đã thực hiện (mô phỏng MCP)', body: ap.title, cls: '' });
         // đọc lại task từ DB để n8n nhận đúng BẢN CEO ĐÃ SỬA (regenArtifact vừa cập nhật output_ref)
-        await this.fireN8n(ap, db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id));
+        const freshTask = db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id);
+        await this.fireN8n(ap, freshTask);
+        await this.emitRealArtifact(ap, freshTask); // sinh .eml/.ics thật + ghi sổ chiến dịch
       } else if (note && note.trim()) {
         // từ chối KÈM LÝ DO → task quay lại NV làm lại theo góp ý CEO (chương 9.3)
         const brief = JSON.parse(task.brief || '{}');
@@ -688,10 +811,22 @@ class Orchestrator {
         if (this.mission(ap.mission_id).status === 'waiting_approval') this.setMission(ap.mission_id, 'running');
         setTimeout(() => this.tick(), 800);
       } else {
+        // CEO chấp nhận bản dưới ngưỡng → vẫn phải sinh FILE vào Xưởng + ghi sổ (như task đạt)
         this.setTask(task, 'done');
         db.prepare('UPDATE tasks SET done_at=? WHERE id=?').run(now(), task.id);
         db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
           .run('decision', `CEO chấp nhận "${task.title}" điểm ${task.score} (dưới ngưỡng, có ghi chú)`, ap.mission_id, now());
+        if (task.output_ref && !db.prepare('SELECT 1 FROM artifacts WHERE task_id=?').get(task.id)) {
+          const brief = JSON.parse(task.brief || '{}');
+          try {
+            const art = await buildArtifact({ title: task.title, content: task.output_ref, format: brief.format_dau_ra || 'docx', version: 1, taskId: task.id });
+            const artId = uid('art');
+            db.prepare(`INSERT INTO artifacts(id,mission_id,task_id,agent_id,name,type,path,version,score,created_at)
+              VALUES(?,?,?,?,?,?,?,1,?,?)`).run(artId, task.mission_id, task.id, task.assignee_id, art.fileName, art.type, art.absPath, task.score, now());
+            this.emit('artifact.new', { artifactId: artId, name: art.fileName, icon: ICONS[art.type] || '📄', agentId: task.assignee_id, score: task.score });
+          } catch (e) { log('accept artifact err: ' + e.message); }
+          this.recordBiz(task, task.assignee_id);
+        }
       }
     }
     this.setAgent('coo', 'idle');
@@ -776,6 +911,146 @@ class Orchestrator {
     db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
       .run('lesson', `Nhiệm vụ "${m.title}" hoàn thành, điểm TB ${avg || '—'}, chi phí ${this.mission(missionId).spent_vnd}đ`, missionId, now());
     if (this._reporting) this._reporting.delete(missionId);
+  }
+
+  /* ============ COO CHỦ ĐỘNG — SÁNG KIẾN (Phase 3) ============ */
+  hasActiveMission() {
+    // coi cả mission đang chờ CEO (waiting_approval/over_budget/paused) là "đang bận" — không quấy bằng sáng kiến
+    return db.prepare("SELECT COUNT(*) c FROM missions WHERE status IN ('briefing','planning','running','reporting','waiting_approval','over_budget','paused')").get().c > 0;
+  }
+
+  async runInitiativeCheck(force) {
+    if (!force) {
+      if (this.hasActiveMission()) return 0;                       // đang bận thì không quấy
+      const pend = db.prepare("SELECT COUNT(*) c FROM initiatives WHERE status='pending'").get().c;
+      if (pend >= 3) return 0;                                     // đã có sáng kiến chờ, không dồn thêm
+      const lastI = db.prepare('SELECT created_at FROM initiatives ORDER BY created_at DESC LIMIT 1').get();
+      if (lastI && Date.now() - new Date(lastI.created_at).getTime() < 8 * 60000) return 0; // giãn nhịp ≥8 phút
+      if (!db.prepare('SELECT 1 FROM company WHERE id=1').get()) return 0; // chưa onboard
+    }
+    const dna = this.dna();
+    const state = biz.stateForInitiative();
+    let proposals = [];
+    try {
+      if (INITIATIVE && INITIATIVE.propose) proposals = INITIATIVE.propose({ dna, state, weekday: new Date().getDay() }) || [];
+    } catch (e) { log('initiative propose err: ' + e.message); }
+    proposals = (proposals || []).slice(0, 3).filter(p => p && p.command && p.title);
+    if (!proposals.length) return 0;
+
+    const enabled = new Set(this.roster().map(r => r.dept_id));
+    const fresh = [];
+    for (const p of proposals) {
+      if (p.phong && !enabled.has(p.phong)) continue;
+      // dedup theo KHÓA ỔN ĐỊNH (command đã chuẩn hóa) + không lặp lại sáng kiến đã quyết trong 24h
+      const cmdKey = String(p.command || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 120);
+      const dup = db.prepare(
+        "SELECT 1 FROM initiatives WHERE (status='pending' OR decided_at > ?) AND LOWER(command) LIKE ?")
+        .get(new Date(Date.now() - 24 * 3600000).toISOString(), '%' + cmdKey.slice(0, 40) + '%');
+      if (dup) continue;
+      const id = uid('ini');
+      db.prepare(`INSERT INTO initiatives(id,title,command,ly_do,phong,loai,status,created_at)
+        VALUES(?,?,?,?,?,?,'pending',?)`)
+        .run(id, String(p.title).slice(0, 80), String(p.command).slice(0, 300), String(p.ly_do || '').slice(0, 400),
+          p.phong || null, p.loai || 'co_hoi', now());
+      fresh.push({ id, ...p });
+    }
+    if (!fresh.length) return 0;
+    const icon = { co_hoi: '💡', rui_ro: '⚠️', dinh_ky: '📆', nhan_su: '🎓' };
+    this.chat('coo', `🔔 <b>Em có ${fresh.length} đề xuất chủ động cho sếp</b> (dựa trên tình hình công ty):<ul>` +
+      fresh.map(p => `<li>${icon[p.loai] || '💡'} <b>${esc(p.title)}</b> — ${esc(p.ly_do || '')}</li>`).join('') +
+      `</ul>Sếp mở mục <b>💡 Sáng kiến</b> để đồng ý hoặc bỏ qua nhé ạ.`, null);
+    this.emit('initiative.new', { count: fresh.length });
+    this.emit('toast', { title: '💡 COO đề xuất việc mới', body: `${fresh.length} sáng kiến chủ động — xem mục Sáng kiến`, cls: 'amber' });
+    return fresh.length;
+  }
+
+  async decideInitiative(id, accept) {
+    const ini = db.prepare('SELECT * FROM initiatives WHERE id=?').get(id);
+    if (!ini || ini.status !== 'pending') return { ok: false, error: 'Sáng kiến không tồn tại hoặc đã xử lý' };
+    db.prepare('UPDATE initiatives SET status=?, decided_at=? WHERE id=?').run(accept ? 'accepted' : 'dismissed', now(), id);
+    this.emit('initiative.update', { id });
+    if (accept) {
+      // phòng chủ trì bị tắt sau khi đề xuất → báo CEO, không tạo mission mù (planner sẽ tự chọn phòng bật)
+      if (ini.phong) {
+        const dep = db.prepare('SELECT enabled FROM departments WHERE id=?').get(ini.phong);
+        if (dep && !dep.enabled) this.chat('coo', `Lưu ý: phòng chủ trì sáng kiến này hiện đã tắt — em sẽ giao cho phòng phù hợp đang bật ạ.`, null);
+      }
+      this.chat('ceo', `Đồng ý đề xuất: ${esc(ini.title)}`, null);
+      const mid = await this.createMission(ini.command, 'go');
+      return { ok: true, missionId: mid };
+    }
+    return { ok: true };
+  }
+
+  /* ============ HỌP CHIẾN LƯỢC ĐA AGENT (Phase 3) ============ */
+  isStrategic(command) {
+    const n = ' ' + String(command || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ') + ' ';
+    // Chỉ nhận diện mẫu QUYẾT ĐỊNH rõ ràng — tránh nuốt lệnh thường có chứa 'phương án'/'lựa chọn'
+    return /( co nen | nen hay khong| co the mo rong| chien luoc | dinh huong chien luoc | quyet dinh chien luoc | trieu tap hop | to chuc hop ban | can quyet dinh | huong di nao | chon huong )/.test(n)
+      || /\bco nen\b.*\bkhong\b/.test(n);
+  }
+
+  async runMeeting(missionId) {
+    const m = this.mission(missionId);
+    const dna = this.dna();
+    const managers = this.roster().filter(r => r.is_manager);
+    if (!managers.length || !MEETING) return this.runPlanning(missionId, null, { fromMeeting: true }); // fallback
+    this.setMission(missionId, 'running');
+    this.chat('coo', `Đây là quyết định chiến lược — em triệu tập <b>cuộc họp</b> với các trưởng phòng để nghe đủ góc nhìn trước khi trình sếp ạ.`, missionId);
+    this.setAgent('coo', 'work', 'Chủ trì cuộc họp chiến lược…');
+    const perspectives = [];
+    for (const mgr of managers) {
+      this.packet('coo', mgr.id, 'gold');
+      this.setAgent(mgr.id, 'think', 'Chuẩn bị góc nhìn cho cuộc họp…');
+      await sleep(700);
+      let per;
+      try {
+        per = MEETING.perspective(mgr.dept_id, m.ceo_command, { dna, command: m.ceo_command, deptName: this.deptName(mgr.dept_id) });
+      } catch { per = null; }
+      if (per) {
+        const stanceIcon = { ung_ho: '👍', than_trong: '🤔', phan_doi: '✋' };
+        this.setAgent(mgr.id, 'review', `${stanceIcon[per.stance] || '💬'} ${(per.goc_nhin || '').slice(0, 40)}…`);
+        this.agentLog(mgr.id, `Ý kiến họp: ${per.de_xuat || per.goc_nhin || ''}`, 'a');
+        perspectives.push({ deptId: mgr.dept_id, deptName: this.deptName(mgr.dept_id), agentId: mgr.id, ...per });
+        this.packet(mgr.id, 'coo', 'jade');
+      }
+      await sleep(400);
+      this.setAgent(mgr.id, 'idle');
+    }
+    // COO tổng hợp
+    this.setAgent('coo', 'review', 'Tổng hợp ý kiến các phòng thành phương án…');
+    await sleep(900);
+    let synth;
+    try { synth = MEETING.synthesize(m.ceo_command, perspectives, { dna, command: m.ceo_command }); } catch { synth = null; }
+    if (!synth || !synth.options || !synth.options.length) {
+      // không tổng hợp được → chuyển sang lập kế hoạch thường
+      return this.runPlanning(missionId, null, { fromMeeting: true });
+    }
+    const meetId = uid('mt');
+    db.prepare('INSERT INTO meetings(id,mission_id,topic,perspectives_json,synthesis_json,created_at) VALUES(?,?,?,?,?,?)')
+      .run(meetId, missionId, m.ceo_command, JSON.stringify(perspectives), JSON.stringify(synth), now());
+    // tạo 1 task "khung" để approval bám vào (giữ mô hình dữ liệu nhất quán)
+    const tid = uid('t');
+    db.prepare(`INSERT INTO tasks(id,mission_id,dept_id,assignee_id,reviewer_id,title,brief,deps_json,status,review_round,created_at)
+      VALUES(?,?,?,?,?,?,?,?,'waiting_approval',0,?)`)
+      .run(tid, missionId, 'bgd', 'coo', 'coo', 'Quyết định: ' + m.ceo_command.slice(0, 80),
+        JSON.stringify({ muc_tieu: m.ceo_command }), JSON.stringify([]), now());
+    // preview là VĂN BẢN THÔ (client sẽ esc 1 lần) — không nhúng thẻ <b> để tránh escape 2 lần
+    const perspHtml = perspectives.map(p => {
+      const si = { ung_ho: '👍 Ủng hộ', than_trong: '🤔 Thận trọng', phan_doi: '✋ Phản đối' }[p.stance] || '💬';
+      return `● ${p.deptName} (${si}): ${p.goc_nhin || ''}`;
+    }).join('\n\n');
+    const opts = synth.options.map(o => ({ key: o.key, label: `${o.key}. ${o.label}` }));
+    this.createApproval({ id: tid, mission_id: missionId, dept_id: 'bgd', score: null },
+      'decision',
+      `🗳️ Quyết định chiến lược: ${m.ceo_command.slice(0, 70)}`,
+      `${synth.tom_tat || 'Các trưởng phòng đã họp và nêu góc nhìn. Sếp chọn hướng để cả công ty chạy theo:'}\n\n${synth.options.map(o => `${o.key}. ${o.label} — ${o.mo_ta}\n   ✅ ${o.uu_diem}\n   ⚠️ ${o.nhuoc_diem}${o.phong_ung_ho && o.phong_ung_ho.length ? '\n   Ủng hộ: ' + o.phong_ung_ho.map(d => this.deptName(d)).join(', ') : ''}`).join('\n\n')}`,
+      opts, perspHtml.slice(0, 1600), { meetingId: meetId });
+    db.prepare('UPDATE meetings SET synthesis_json=? WHERE id=?').run(JSON.stringify(synth), meetId);
+    this.setMission(missionId, 'waiting_approval');
+    this.setAgent('coo', 'wait', 'Trình phương án — chờ CEO quyết');
+    this.chat('coo', `📋 <b>Cuộc họp xong</b> — em đã trình ${synth.options.length} phương án trong Hộp phê duyệt. Sếp chọn giúp em nhé ạ.`, missionId);
+    this.emit('toast', { title: '🗳️ Có phương án chờ CEO chọn', body: m.ceo_command.slice(0, 50), cls: 'amber' });
   }
 
   /* Chạy tiếp mission over_budget sau khi CEO nâng trần */

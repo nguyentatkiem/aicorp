@@ -142,6 +142,33 @@ Bấm biểu tượng 📦 ở thanh bên trái. Đây là kho chứa mọi thà
 
 Mỗi dòng ghi rõ: tên file, phòng ban làm, nhân viên làm, **điểm review**, số phiên bản và ngày tạo. Bấm nút **Xem** để mở hoặc tải về máy. Khi nhân viên vừa hoàn thành, bạn còn thấy hiệu ứng file "bay" từ sơ đồ về Xưởng — vui mắt và biết ngay có hàng mới.
 
+Ngoài các file trên, khi bạn duyệt một hành động thật, công ty còn tạo:
+- ✉️ **File thư (.eml)** khi bạn duyệt gửi mail — mở thẳng bằng ứng dụng Mail/Outlook để gửi.
+- 📅 **File lịch (.ics)** khi bạn duyệt đăng bài hoặc đặt lịch — mở bằng ứng dụng Lịch để ghim nhắc.
+
+---
+
+## 7b. 🎛️ Buồng lái kinh doanh — bức tranh doanh nghiệp
+
+Bấm biểu tượng 🎛️ ở thanh bên trái. Đây không phải danh sách file, mà là **sức khỏe công ty tích lũy qua thời gian** — càng giao việc, bức tranh càng rõ:
+
+- **6 ô số lớn:** doanh thu dự phóng/tháng, lợi nhuận hoạt động, số chiến dịch đã lên lịch, lead trong pipeline, chi phí AI/tháng (như tiền lương thật của đội AI), điểm chất lượng trung bình.
+- **Bảng P&L dự phóng:** doanh thu − giá vốn − chi phí AI = lợi nhuận, để bạn biết công ty đang lãi hay lỗ theo kế hoạch.
+- **Nhịp hoạt động 6 tuần** và **tiến độ mục tiêu 3 tháng** bạn khai lúc khai trương.
+- **Dòng sự kiện kinh doanh:** mỗi việc quan trọng (lập dự toán, chốt báo giá, đăng chiến dịch…) được ghi sổ tự động.
+
+---
+
+## 7c. 💡 Sáng kiến của COO — trợ lý chủ động
+
+Bấm biểu tượng 💡. COO không chỉ chờ lệnh — nó **tự nhìn tình hình và đề xuất việc nên làm**, ví dụ: "Đối thủ vừa giảm giá, mình nên phản ứng", "Đã lâu chưa chăm khách cũ", "Nhân viên X hay bị trả bài, nên đào tạo lại", hay kế hoạch đầu tuần. Mỗi đề xuất có nút:
+- **✔ Đồng ý — giao việc ngay:** biến sáng kiến thành nhiệm vụ, cả công ty bắt tay làm.
+- **Bỏ qua:** nếu chưa cần.
+
+Bạn cũng có thể bấm **"Nhờ COO rà soát ngay"** để COO xem xét và đề xuất tức thì. Khi có sáng kiến mới, biểu tượng 💡 hiện số đỏ.
+
+> 💬 **Mẹo — Họp chiến lược:** khi bạn hỏi một câu quyết định như *"Công ty có nên tăng gấp đôi ngân sách quảng cáo không?"*, COO sẽ **triệu tập các trưởng phòng họp**: mỗi phòng nêu góc nhìn riêng (Marketing muốn đẩy mạnh, Tài chính lo hòa vốn…), rồi COO tổng hợp thành 2–3 phương án đưa vào Hộp phê duyệt để bạn chọn. Phương án bạn chốt được ghi vào bộ nhớ để mọi phòng làm theo thống nhất.
+
 ---
 
 ## 8. 👥 Quản trị nhân sự AI

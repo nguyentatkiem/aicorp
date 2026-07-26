@@ -105,7 +105,8 @@ async function waitMission(id, states, maxSec = 200) {
     check('CEO sửa rồi duyệt', dec.ok);
     await sleep(4000);
     const artsAfter = (await get('/artifacts')).filter(a => a.task_id === aps[0].task_id);
-    check('Artifact phiên bản mới sau khi CEO sửa', artsAfter.length === artsBefore + 1, `v${Math.max(...artsAfter.map(a => a.version))}`);
+    // CEO sửa → sinh bản v2 (regen); duyệt bài Facebook → Phase 3 sinh thêm .ics lịch đăng ⇒ ≥ +1
+    check('Artifact phiên bản mới sau khi CEO sửa', artsAfter.length >= artsBefore + 1 && artsAfter.some(a => a.type !== 'ics' && a.version >= 2), `${artsAfter.length - artsBefore} file mới`);
     for (let i = 0; i < 10 && !hookPayload; i++) await sleep(500);
     check('n8n webhook THẬT được bắn', !!hookPayload && hookPayload.event === 'real_action_approved', hookPayload ? hookPayload.approval.title.slice(0, 40) : 'không nhận được');
   }

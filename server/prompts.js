@@ -52,8 +52,10 @@ ghi rõ format file đầu ra; nếu task kết thúc bằng hành động thậ
 }
 
 function execute(brief, feedback, round) {
-  return `TASK: ${JSON.stringify(brief, null, 1)}
-${feedback ? `ĐÂY LÀ VÒNG SỬA THỨ ${round}. Nhận xét từ trưởng phòng vòng trước (bắt buộc sửa hết):\n${feedback}` : ''}
+  const handoff = (brief.dau_vao_tu_phong_khac || []);
+  const b = { ...brief }; delete b.dau_vao_tu_phong_khac; delete b.ceo_feedback; delete b.model_boost;
+  return `TASK: ${JSON.stringify(b, null, 1)}
+${handoff.length ? `DỮ LIỆU CÁC PHÒNG KHÁC ĐÃ BÀN GIAO (BẮT BUỘC dùng, trích số liệu/nội dung liên quan thay vì tự bịa):\n${handoff.join('\n---\n')}\n` : ''}${feedback ? `ĐÂY LÀ VÒNG SỬA THỨ ${round}. Nhận xét từ trưởng phòng vòng trước (bắt buộc sửa hết):\n${feedback}` : ''}
 Nếu thiếu dữ liệu đầu vào thì trả về JSON {"can_bo_sung":["..."]}.
 Kết quả cuối đặt trong khối \`\`\`output ... \`\`\` đúng format yêu cầu (nội dung văn bản/markdown; nếu là bảng tính hãy dùng bảng markdown).`;
 }
