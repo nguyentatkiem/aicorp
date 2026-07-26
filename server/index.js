@@ -20,9 +20,31 @@ syncSkillsFromSeedDir();
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
+
+/* ---------- CỔNG ĐĂNG NHẬP ----------
+   Chỉ bật khi đặt biến môi trường AICORP_PASSWORD (vd khi phơi ra ngoài qua Cloudflare Tunnel).
+   Không đặt → chạy localhost như cũ, KHÔNG hỏi mật khẩu. So sánh hằng thời gian chống dò timing. */
+const crypto = require('crypto');
+const SITE_PASSWORD = process.env.AICORP_PASSWORD || '';
+function passOk(header) {
+  if (!SITE_PASSWORD) return true;
+  if (!header || !/^Basic /i.test(header)) return false;
+  let dec; try { dec = Buffer.from(header.slice(6), 'base64').toString('utf8'); } catch { return false; }
+  const pass = dec.slice(dec.indexOf(':') + 1);          // bỏ phần username, lấy mật khẩu
+  const a = Buffer.from(pass), b = Buffer.from(SITE_PASSWORD);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+if (SITE_PASSWORD) {
+  app.use((req, res, next) => {
+    if (passOk(req.headers.authorization)) return next();
+    res.set('WWW-Authenticate', 'Basic realm="AICORP", charset="UTF-8"');
+    res.status(401).send('AICORP — cần đăng nhập');
+  });
+}
 app.use(express.static(path.join(__dirname, '..', 'public')));
 const server = http.createServer(app);
 const io = new Server(server);
+if (SITE_PASSWORD) io.use((socket, next) => passOk(socket.request.headers.authorization) ? next() : next(new Error('unauthorized')));
 const orch = new Orchestrator(io);
 
 const upload = multer({ dest: DIRS.brain, limits: { fileSize: 30 * 1024 * 1024 } });
