@@ -31,8 +31,10 @@ async function boot() {
   bindUI();
   showMission();
   refreshInitiativeBadge();
+  refreshCRMBadge();
   setInterval(refreshStats, 15000);
   setInterval(refreshInitiativeBadge, 30000);
+  setInterval(refreshCRMBadge, 45000);
   setInterval(ambient, 7000);
 }
 
@@ -618,6 +620,8 @@ function connectSocket() {
   });
   socket.on('initiative.new', () => { refreshInitiativeBadge(); if ($('#screen-initiatives').classList.contains('active')) refreshInitiatives(); });
   socket.on('initiative.update', () => { refreshInitiativeBadge(); if ($('#screen-initiatives').classList.contains('active')) refreshInitiatives(); });
+  socket.on('crm.update', () => { refreshCRMBadge(); if ($('#screen-crm').classList.contains('active')) debounce('crm', refreshCRM, 500); if ($('#screen-cockpit').classList.contains('active')) debounce('cockpit', refreshCockpit, 600); });
+  socket.on('playbook.new', () => { if ($('#screen-hr').classList.contains('active')) refreshPlaybooks(); });
 }
 const debTimers = {};
 function debounce(key, fn, ms) { clearTimeout(debTimers[key]); debTimers[key] = setTimeout(fn, ms); }
@@ -878,6 +882,71 @@ function switchScreen(name) {
   if (name === 'settings') loadSettings();
   if (name === 'cockpit') refreshCockpit();
   if (name === 'initiatives') refreshInitiatives();
+  if (name === 'crm') refreshCRM();
+  if (name === 'hr') refreshPlaybooks();
+}
+
+/* ================= CRM — KHÁCH HÀNG & BÁN HÀNG (v4) ================= */
+async function refreshCRM() {
+  const c = await api('/crm');
+  const s = c.snapshot;
+  const stageIcon = { moi: '🌱', am: '☕', nong: '🔥', chot: '✅', mat: '💤' };
+  const leadsByStage = st => c.leads.filter(l => l.stage === st);
+  const pipe = c.stages.map(st => {
+    const items = leadsByStage(st);
+    return `<div class="pipe-col ${st}"><div class="ph">${stageIcon[st]} ${esc(c.stageLabel[st])}<span class="cnt">${items.length}</span></div>
+     <div class="pipe-body">${items.slice(0, 30).map(l => `<div class="lead-card">
+       <div class="ln">${esc(l.cust_name || 'Khách')}</div>
+       <div class="lm"><span>${esc(l.product || '')}</span>${l.score ? `<span class="lsc">${l.score}đ</span>` : ''}${l.cust_city ? `<span>${esc(l.cust_city)}</span>` : ''}</div>
+       </div>`).join('') || '<div style="font-size:11px;color:var(--dim);padding:6px">—</div>'}</div></div>`;
+  }).join('');
+  const openTk = c.tickets.filter(t => t.status !== 'xong');
+  $('#crmbody').innerHTML = `
+   <div class="kpi-row" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+     <div class="kpi-tile info"><div class="kv">${s.customersN}</div><div class="kl">Khách hàng</div></div>
+     <div class="kpi-tile warn"><div class="kv">${s.byStage.moi + s.byStage.am + s.byStage.nong}</div><div class="kl">Lead trong phễu</div><div class="ks">${s.byStage.nong} nóng · sẵn sàng chốt</div></div>
+     <div class="kpi-tile pos"><div class="kv">${s.ordersN}</div><div class="kl">Đơn đã chốt</div><div class="ks">doanh thu ${fmtVnd(s.revenueMonth)}/tháng</div></div>
+     <div class="kpi-tile ${s.openTickets ? 'neg' : 'pos'}"><div class="kv">${s.openTickets}</div><div class="kl">Ticket đang mở</div><div class="ks">CSKH cần xử lý</div></div>
+   </div>
+   <div class="card"><h3>🧲 Phễu bán hàng (lead pipeline)</h3><div class="pipe-row">${pipe}</div>
+     <div style="font-size:11px;color:var(--muted)">💡 Giao "chấm lead" cho NV Chăm Lead để đẩy lead qua phễu; giao "tư vấn chốt đơn" cho NV Sales để chốt lead nóng thành đơn (ra doanh thu thật).</div>
+   </div>
+   <div class="grid2">
+     <div class="card"><h3>🎫 Ticket CSKH ${openTk.length ? `<span class="ftag" style="background:rgba(229,72,77,.12);color:var(--red);margin-left:auto">${openTk.length} đang mở</span>` : ''}</h3>
+       ${c.tickets.length ? c.tickets.slice(0, 12).map(t => `<div class="lead-card ${t.status === 'xong' ? 'tk-done' : 'tk-open'}" style="margin-bottom:7px">
+         <div class="ln">${{ khieu_nai: '😠 Khiếu nại', hoi_dap: '❓ Hỏi đáp', doi_tra: '↩️ Đổi trả' }[t.kind] || t.kind} — ${esc(t.cust_name || 'Khách')}</div>
+         <div class="lm">${esc(t.content || '')}</div>
+         ${t.resolution ? `<div class="lm" style="color:var(--jade)">✔ ${esc(t.resolution)}</div>` : ''}</div>`).join('')
+         : '<div style="color:var(--muted);font-size:12px">Chưa có ticket. Ticket sẽ tự phát sinh khi có khách mua hàng.</div>'}
+     </div>
+     <div class="card"><h3>💰 Đơn hàng gần đây</h3>
+       ${c.orders.length ? `<table class="tbl"><tr><th>Khách</th><th>Sản phẩm</th><th>Giá trị</th><th>Ngày</th></tr>` +
+         c.orders.slice(0, 12).map(o => `<tr><td>${esc(o.cust_name || '—')}</td><td>${esc(o.product || '')}</td>
+         <td style="color:var(--jade);font-family:'JetBrains Mono',monospace">${fmtVnd(o.amount_vnd)}</td><td>${new Date(o.created_at).toLocaleDateString('vi-VN')}</td></tr>`).join('') + '</table>'
+         : '<div style="color:var(--muted);font-size:12px">Chưa có đơn. Giao việc "tư vấn chốt đơn" cho phòng Kinh doanh để chốt lead nóng.</div>'}
+     </div>
+   </div>`;
+}
+async function refreshCRMBadge() {
+  try { const c = await api('/crm'); const b = $('#crmbadge'); const n = c.snapshot.openTickets; b.style.display = n ? 'flex' : 'none'; b.textContent = n; } catch {}
+}
+
+/* ================= PLAYBOOK (vòng học) ================= */
+async function refreshPlaybooks() {
+  const p = await api('/playbooks');
+  $('#pbcount').textContent = `${p.count} công thức · dùng ${p.totalUses} lần`;
+  $('#playbooklist').innerHTML = p.list.length ? p.list.map(pb => `
+   <div class="pb-item"><div class="pbt">${esc(pb.dept_name || pb.dept_id)} · ${esc(pb.title)} <span class="ftag" style="background:rgba(49,201,126,.12);color:var(--jade)">${pb.score}đ</span></div>
+     <div class="pbp">${esc(pb.pattern)}</div>
+     <div class="pbm">Đã tái sử dụng ${pb.uses} lần · đúc kết ${new Date(pb.created_at).toLocaleDateString('vi-VN')}</div></div>`).join('')
+    : '<div style="color:var(--muted);font-size:12px">Chưa có công thức nào. Khi một bài đạt ≥95 điểm, công ty sẽ tự đúc kết thành công thức và dùng lại cho việc sau.</div>';
+  // gợi ý thăng chức / đào tạo lại
+  if (p.review && (p.review.promote.length || p.review.retrain.length)) {
+    const parts = [];
+    if (p.review.promote.length) parts.push('⭐ Nên nâng vai: ' + p.review.promote.map(a => esc(a.name)).join(', '));
+    if (p.review.retrain.length) parts.push('🎓 Nên đào tạo lại: ' + p.review.retrain.map(a => esc(a.name)).join(', '));
+    $('#hrsub').innerHTML = parts.join(' · ');
+  }
 }
 
 /* ================= BUỒNG LÁI KINH DOANH (Phase 3) ================= */
@@ -955,6 +1024,33 @@ async function refreshInitiativeBadge() {
   b.style.display = p.length ? 'flex' : 'none';
   b.textContent = p.length;
 }
+
+/* ================= ĐA CÔNG TY (v4) ================= */
+async function toggleCompanyDropdown() {
+  let dd = $('#coDropdown');
+  if (dd && dd.classList.contains('show')) { dd.classList.remove('show'); return; }
+  const data = await api('/companies');
+  if (!dd) { dd = el('<div id="coDropdown"></div>'); document.body.appendChild(dd); }
+  dd.innerHTML = data.companies.map(c => `
+   <div class="co-item ${c.id === data.active ? 'active' : ''}" onclick="switchCompany('${c.id}','${c.id === data.active}')">
+     <span class="cdot" style="${c.id === data.active ? '' : 'background:var(--dim)'}"></span>
+     <span>${esc(c.name || '(công ty chưa đặt tên)')}</span>${c.id === data.active ? '<span style="margin-left:auto;font-size:10px">đang mở</span>' : ''}
+   </div>`).join('') +
+   `<div class="co-item co-new" onclick="newCompany()">➕ <span>Thêm công ty mới…</span></div>`;
+  dd.classList.add('show');
+}
+window.switchCompany = async (id, isActive) => {
+  if (isActive === 'true' || isActive === true) { $('#coDropdown').classList.remove('show'); return; }
+  if (!confirm('Chuyển sang công ty khác? App sẽ tự thoát và bạn chạy lại "npm start" để vào công ty đã chọn.')) return;
+  const r = await post(`/companies/${id}/switch`, {});
+  if (r.ok) alert(r.message);
+};
+window.newCompany = async () => {
+  const name = prompt('Tên công ty mới:');
+  if (!name || !name.trim()) return;
+  const r = await post('/companies', { name: name.trim() });
+  if (r.ok) alert(r.message); else toast('⚠️', r.error || 'Lỗi', 'red');
+};
 function bindUI() {
   document.querySelectorAll('.rail-btn').forEach(b => b.addEventListener('click', () => switchScreen(b.dataset.screen)));
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
@@ -1010,6 +1106,11 @@ function bindUI() {
     toast(r.ok ? '🧩 Đã cài skill' : '⚠️ Lỗi', r.ok ? `${r.slug} — vào Nhân sự để gắn cho agent` : (r.error || ''), r.ok ? '' : 'red');
     e.target.value = '';
     refreshConnect();
+  });
+  $('#cobadge').onclick = toggleCompanyDropdown;
+  document.addEventListener('click', e => {
+    const dd = $('#coDropdown');
+    if (dd && dd.classList.contains('show') && !dd.contains(e.target) && !$('#cobadge').contains(e.target)) dd.classList.remove('show');
   });
   $('#ini_check').onclick = async () => {
     $('#ini_check').textContent = 'Đang rà soát…';

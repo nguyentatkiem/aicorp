@@ -7,3 +7,5 @@ data/
 workspace/
 secret/
 
+companies.json
+companies/

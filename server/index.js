@@ -25,6 +25,21 @@ const orch = new Orchestrator(io);
 
 const upload = multer({ dest: DIRS.brain, limits: { fileSize: 30 * 1024 * 1024 } });
 
+/* Chống CSRF cho các thao tác nguy hiểm (thoát tiến trình / ghi đè dữ liệu):
+   chỉ chấp nhận request cùng nguồn (không có Origin lạ). App chạy localhost đơn người dùng. */
+function sameOrigin(req, res, next) {
+  const origin = req.get('Origin');
+  if (origin) {
+    try {
+      const h = new URL(origin).host;
+      if (h !== req.get('Host')) return res.status(403).json({ error: 'Từ chối: request khác nguồn' });
+    } catch { return res.status(403).json({ error: 'Origin không hợp lệ' }); }
+  }
+  const sfs = req.get('Sec-Fetch-Site');
+  if (sfs && !['same-origin', 'same-site', 'none'].includes(sfs)) return res.status(403).json({ error: 'Từ chối: cross-site' });
+  next();
+}
+
 /* ---------------- STATE / ONBOARDING ---------------- */
 app.get('/api/state', (req, res) => {
   const company = db.prepare('SELECT * FROM company WHERE id=1').get() || null;
@@ -59,6 +74,8 @@ app.post('/api/onboarding', (req, res) => {
     if (engine.apiKey) setCredentials({ anthropic_api_key: engine.apiKey.trim() });
   }
   (dna.facts || []).forEach(f => db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,NULL,?)').run('fact', f, now()));
+  try { require('./crm').seedCustomers(dna, 12); } catch (e) { log('seed customers: ' + e.message); }   // v4: khách hàng nền
+  require('./db').setCompanyName(require('./db').ACTIVE_COMPANY, dna.company.name);                        // v4: tên công ty vào registry
   log('onboarding done: ' + dna.company.name);
   res.json({ ok: true });
 });
@@ -299,9 +316,11 @@ app.post('/api/agents', (req, res) => {
   const lv = ['tp', 'nv'].includes(level) ? level : 'nv';
   const validSkills = (Array.isArray(skills) ? skills : []).filter(s => db.prepare('SELECT 1 FROM skills WHERE id=?').get(s));
   const id = 'cus_' + uid('').replace('_', '');
+  // làm sạch ký tự < > để tên/chức danh không thành vector XSS ở bất kỳ chỗ render nào
+  const clean = s => String(s || '').replace(/[<>]/g, '').trim();
   db.prepare(`INSERT INTO agents(id,dept_id,name,role_title,avatar,is_manager,system_prompt,model,skills_json,tools_json,enabled)
     VALUES(?,?,?,?,?,0,?,?,?,?,1)`)
-    .run(id, dept_id, name.trim().slice(0, 40), role_title.trim().slice(0, 80),
+    .run(id, dept_id, clean(name).slice(0, 40), clean(role_title).slice(0, 80),
       (avatar || '🧑‍💼').slice(0, 8),
       (role_block || `Bạn là ${name.trim()}, ${role_title.trim()} của phòng ${dept.name}. Làm đúng brief, kết quả chuyên nghiệp, giọng đúng DNA thương hiệu.`).slice(0, 2000),
       lv, JSON.stringify(validSkills), JSON.stringify([]));
@@ -406,7 +425,7 @@ app.get('/api/backup', (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Sao lưu lỗi: ' + e.message }); }
 });
 
-app.post('/api/backup/import', upload.single('file'), (req, res) => {
+app.post('/api/backup/import', sameOrigin, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Chưa chọn file .aicorp' });
   try {
     const zip = new AdmZip(req.file.path);
@@ -422,21 +441,25 @@ app.post('/api/backup/import', upload.single('file'), (req, res) => {
     res.json({ ok: true, restart: true, message: 'Đã nhận bản sao lưu. App sẽ tự thoát trong 2 giây — sếp chạy lại "npm start" để hoàn tất khôi phục.' });
     setTimeout(() => {
       try {
+        // đọc TẤT CẢ dữ liệu entry vào bộ nhớ TRƯỚC (nếu zip lỗi thì phát hiện ở đây, chưa đụng DB cũ)
+        const rootReal = fs.realpathSync(DIRS.root);
+        const payload = [];
+        for (const e of entries) {
+          if (e.isDirectory) continue;
+          const dest = path.join(DIRS.root, e.entryName);
+          if (!path.resolve(dest).startsWith(rootReal + path.sep)) continue;
+          payload.push({ dest, data: e.getData() });   // getData() có thể ném → nhảy vào catch, DB cũ nguyên vẹn
+        }
+        // sao lưu DB hiện tại trước khi ghi đè (cứu nếu cần)
+        const cur = path.join(DIRS.data, 'aicorp.db');
+        if (fs.existsSync(cur)) { try { fs.copyFileSync(cur, cur + '.pre-restore.bak'); } catch {} }
         db.pragma('wal_checkpoint(TRUNCATE)');
         db.close();
         for (const suffix of ['-wal', '-shm']) {
           const f = path.join(DIRS.data, 'aicorp.db' + suffix);
           if (fs.existsSync(f)) fs.unlinkSync(f);
         }
-        // giải nén từng entry an toàn vào đúng thư mục con, kiểm lại đích nằm trong ~/AICORP
-        const rootReal = fs.realpathSync(DIRS.root);
-        for (const e of entries) {
-          if (e.isDirectory) continue;
-          const dest = path.join(DIRS.root, e.entryName);
-          if (!path.resolve(dest).startsWith(rootReal + path.sep)) continue;
-          fs.mkdirSync(path.dirname(dest), { recursive: true });
-          fs.writeFileSync(dest, e.getData());
-        }
+        for (const { dest, data } of payload) { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, data); }
         log('backup imported, exiting for restart');
       } catch (e) { log('backup import fail: ' + e.message); }
       process.exit(0);
@@ -521,6 +544,43 @@ app.get('/api/meetings/:id', (req, res) => {
 });
 app.get('/api/meetings', (req, res) => {
   res.json(db.prepare('SELECT id, mission_id, topic, created_at FROM meetings ORDER BY created_at DESC LIMIT 20').all());
+});
+
+/* ---------------- V4: CRM SỐNG ---------------- */
+const crm = require('./crm');
+app.get('/api/crm', (req, res) => {
+  const dnaRow = db.prepare('SELECT json FROM dna WHERE id=1').get();
+  res.json(crm.view(dnaRow ? JSON.parse(dnaRow.json) : null));
+});
+
+/* ---------------- V4: VÒNG HỌC (PLAYBOOK) ---------------- */
+const learning = require('./learning');
+app.get('/api/playbooks', (req, res) => {
+  const s = learning.stats();
+  res.json({ ...s, review: learning.performanceReview() });
+});
+
+/* ---------------- V4: ĐA CÔNG TY ---------------- */
+const dbmod = require('./db');
+app.get('/api/companies', (req, res) => {
+  const list = dbmod.listCompanies();
+  // Công ty đang mở: lấy tên thật từ DB nếu registry chưa có (tương thích dữ liệu cũ)
+  const co = db.prepare('SELECT name FROM company WHERE id=1').get();
+  list.companies = list.companies.map(c =>
+    (c.id === list.active && co && co.name) ? { ...c, name: co.name } : c);
+  res.json(list);
+});
+app.post('/api/companies', sameOrigin, (req, res) => {
+  const name = String((req.body || {}).name || '').replace(/[<>]/g, '').trim().slice(0, 60);
+  if (!name) return res.status(400).json({ error: 'Thiếu tên công ty' });
+  const id = dbmod.addCompany(name);
+  res.json({ ok: true, id, restart: true, message: `Đã tạo công ty "${name}". App sẽ tự thoát trong 2 giây — chạy lại "npm start" để vào khảo sát DNA cho công ty mới.` });
+  setTimeout(() => { log('new company ' + id + ' — exiting for restart'); process.exit(0); }, 2000);
+});
+app.post('/api/companies/:id/switch', sameOrigin, (req, res) => {
+  if (!dbmod.switchCompany(req.params.id)) return res.status(404).json({ error: 'Không có công ty này' });
+  res.json({ ok: true, restart: true, message: 'Đã chuyển công ty. App sẽ tự thoát trong 2 giây — chạy lại "npm start" để vào công ty đã chọn.' });
+  setTimeout(() => { log('switch company ' + req.params.id + ' — exiting'); process.exit(0); }, 2000);
 });
 
 function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }

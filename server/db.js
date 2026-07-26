@@ -7,16 +7,54 @@ const os = require('os');
 const crypto = require('crypto');
 
 const ROOT = process.env.AICORP_HOME || path.join(os.homedir(), 'AICORP');
+fs.mkdirSync(ROOT, { recursive: true });
+
+/* ===== ĐA CÔNG TY (v4): registry công ty + thư mục dữ liệu theo công ty đang hoạt động =====
+   Backward-compatible: công ty "default" DÙNG THẲNG ~/AICORP (dữ liệu cũ không phải di chuyển).
+   Công ty mới nằm tại ~/AICORP/companies/<slug>/. Chuyển công ty = đổi registry + restart. */
+const REGISTRY_PATH = path.join(ROOT, 'companies.json');
+const DEFAULT_REG = () => ({ active: 'default', companies: [{ id: 'default', name: '', dir: null, created_at: new Date().toISOString() }] });
+function readRegistry() {
+  if (!fs.existsSync(REGISTRY_PATH)) return DEFAULT_REG();
+  try {
+    const r = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
+    if (!r || !Array.isArray(r.companies) || !r.companies.length) throw new Error('registry rỗng');
+    return r;
+  } catch (e) {
+    // KHÔNG âm thầm reset (mất công ty khác): sao lưu file hỏng để cứu tay, rồi mới dùng mặc định
+    try { fs.copyFileSync(REGISTRY_PATH, REGISTRY_PATH + '.corrupt-' + Date.now() + '.bak'); } catch {}
+    return DEFAULT_REG();
+  }
+}
+function writeRegistry(reg) {
+  // ghi nguyên tử: file tạm rồi rename (tránh cắt cụt khi tiến trình chết giữa chừng)
+  const tmp = REGISTRY_PATH + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
+  fs.renameSync(tmp, REGISTRY_PATH);
+}
+function companyDir(id) { return id === 'default' ? ROOT : path.join(ROOT, 'companies', id); }
+
+let REG = readRegistry();
+if (!REG.companies.some(c => c.id === REG.active)) REG.active = REG.companies[0].id;
+let regChanged = false;
+// AICORP_COMPANY chỉ override active TRONG TIẾN TRÌNH NÀY — KHÔNG persist vào registry
+// (tránh env tạm thời ghi đè vĩnh viễn lựa chọn công ty của người dùng)
+let envOverride = null;
+if (process.env.AICORP_COMPANY && REG.companies.some(c => c.id === process.env.AICORP_COMPANY)) envOverride = process.env.AICORP_COMPANY;
+if (!fs.existsSync(REGISTRY_PATH)) { writeRegistry(REG); }   // tạo lần đầu
+const ACTIVE_COMPANY = envOverride || REG.active;
+const CDIR = companyDir(ACTIVE_COMPANY);
+
 const DIRS = {
-  root: ROOT,
-  data: path.join(ROOT, 'data'),
-  workspace: path.join(ROOT, 'workspace'),
-  artifacts: path.join(ROOT, 'workspace', 'artifacts'),
-  brain: path.join(ROOT, 'workspace', 'brain'),
-  skills: path.join(ROOT, 'workspace', 'skills'),
-  logs: path.join(ROOT, 'workspace', 'logs'),
-  backups: path.join(ROOT, 'workspace', 'backups'),
-  secret: path.join(ROOT, 'secret')
+  root: CDIR,
+  data: path.join(CDIR, 'data'),
+  workspace: path.join(CDIR, 'workspace'),
+  artifacts: path.join(CDIR, 'workspace', 'artifacts'),
+  brain: path.join(CDIR, 'workspace', 'brain'),
+  skills: path.join(CDIR, 'workspace', 'skills'),
+  logs: path.join(CDIR, 'workspace', 'logs'),
+  backups: path.join(CDIR, 'workspace', 'backups'),
+  secret: path.join(ROOT, 'secret')   // API key DÙNG CHUNG toàn bộ công ty (key của người dùng)
 };
 Object.values(DIRS).forEach(d => fs.mkdirSync(d, { recursive: true }));
 
@@ -82,6 +120,18 @@ CREATE TABLE IF NOT EXISTS initiatives (id TEXT PRIMARY KEY, title TEXT, command
 -- Phase 3: cuộc họp chiến lược
 CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, mission_id TEXT, topic TEXT,
   perspectives_json TEXT, synthesis_json TEXT, created_at TEXT);
+-- v4: CRM sống
+CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, name TEXT, phone TEXT, segment TEXT,
+  source TEXT, city TEXT, note TEXT, ltv INTEGER DEFAULT 0, status TEXT DEFAULT 'active', created_at TEXT);
+CREATE TABLE IF NOT EXISTS leads (id TEXT PRIMARY KEY, customer_id TEXT, product TEXT, score INTEGER DEFAULT 0,
+  stage TEXT DEFAULT 'moi', source TEXT, assignee TEXT, note TEXT, created_at TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, customer_id TEXT, kind TEXT, content TEXT,
+  status TEXT DEFAULT 'moi', resolution TEXT, created_at TEXT, resolved_at TEXT);
+CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, customer_id TEXT, product TEXT, amount_vnd INTEGER,
+  status TEXT DEFAULT 'done', source_mission TEXT, created_at TEXT);
+-- v4: công ty tự học (playbook)
+CREATE TABLE IF NOT EXISTS playbooks (id TEXT PRIMARY KEY, dept_id TEXT, agent_id TEXT, title TEXT,
+  pattern TEXT, score INTEGER, source_task TEXT, uses INTEGER DEFAULT 0, created_at TEXT);
 `);
 
 /* Migrate cột thêm sau (bỏ qua nếu đã có) */
@@ -117,4 +167,36 @@ function log(line) {
   try { fs.appendFileSync(f, `[${now()}] ${line}\n`); } catch {}
 }
 
-module.exports = { db, DIRS, uid, now, getSetting, setSetting, getCredentials, setCredentials, log };
+/* ===== Quản lý đa công ty ===== */
+function listCompanies() {
+  const reg = readRegistry();
+  return { active: reg.active, companies: reg.companies.map(c => ({ id: c.id, name: c.name || '', created_at: c.created_at })) };
+}
+function addCompany(name) {
+  const reg = readRegistry();
+  const base = String(name || 'cong-ty').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'cong-ty';
+  let id = base, i = 2;
+  // tránh trùng cả trong registry LẪN thư mục mồ côi trên đĩa (không dùng lại data cũ)
+  while (reg.companies.some(c => c.id === id) || id === 'default' || fs.existsSync(companyDir(id))) { id = base + '-' + i++; }
+  reg.companies.push({ id, name: name || '', dir: null, created_at: new Date().toISOString() });
+  reg.active = id;
+  fs.mkdirSync(companyDir(id), { recursive: true });
+  writeRegistry(reg);
+  return id;
+}
+function switchCompany(id) {
+  const reg = readRegistry();
+  if (!reg.companies.some(c => c.id === id)) return false;
+  reg.active = id; writeRegistry(reg); return true;
+}
+function setCompanyName(id, name) {
+  const reg = readRegistry();
+  const c = reg.companies.find(x => x.id === id);
+  if (c) { c.name = name; writeRegistry(reg); }
+}
+
+module.exports = {
+  db, DIRS, uid, now, getSetting, setSetting, getCredentials, setCredentials, log,
+  ACTIVE_COMPANY, listCompanies, addCompany, switchCompany, setCompanyName
+};

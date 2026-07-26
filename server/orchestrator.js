@@ -8,6 +8,8 @@ const { makeEngine, parseJson } = require('./engine');
 const P = require('./prompts');
 const { buildArtifact, buildEml, buildIcs, ICONS } = require('./artifacts');
 const biz = require('./biz');
+const crm = require('./crm');
+const learning = require('./learning');
 let INITIATIVE = null, MEETING = null;
 try { INITIATIVE = require('./demo/initiative'); } catch {}
 try { MEETING = require('./demo/meeting'); } catch {}
@@ -42,6 +44,14 @@ class Orchestrator {
     setInterval(() => { try { this.runCronCheck(); } catch (e) { log('cron error: ' + e.message); } }, 30000);
     // COO chủ động: rà trạng thái công ty & đề xuất sáng kiến định kỳ (Phase 3)
     setInterval(() => this.runInitiativeCheck().catch(e => log('initiative error: ' + e.message)), 90000);
+    // Nhịp khách hàng CRM: pipeline luôn sống (v4)
+    setInterval(() => { try { this.crmTick(); } catch (e) { log('crm tick: ' + e.message); } }, 120000);
+  }
+
+  crmTick() {
+    if (!db.prepare('SELECT 1 FROM company WHERE id=1').get()) return;
+    const r = crm.ambientTick(this.dna());
+    if (r.leads || r.tickets) this.emit('crm.update', r);
   }
 
   /* Danh bạ agent đang bật (dùng cho planner + brief) */
@@ -397,6 +407,10 @@ class Orchestrator {
     // BÀN GIAO DỮ LIỆU (Phase 3): gom output các task phụ thuộc đã xong làm đầu vào thật
     const upstream = this.upstreamOutputs(task);
     if (upstream.length) brief.dau_vao_tu_phong_khac = upstream.map(u => `[${u.dept} · ${u.title}]\n${u.excerpt}`);
+    // VÒNG HỌC (v4): nạp playbook phòng (công thức bài từng đạt điểm cao) để chất lượng tăng dần
+    const pb = learning.playbookFor(task.dept_id, brief.format_dau_ra || 'docx');
+    let usedPlaybookId = null;
+    if (pb) { brief.cong_thuc_phong = pb.pattern; usedPlaybookId = pb.id; this.agentLog(nv.id, `Áp dụng công thức phòng đã đúc kết (playbook)`, 'g'); }
 
     this.setTask(task, 'doing');
     this.packet(tp.id, nv.id, 'gold');
@@ -479,6 +493,7 @@ class Orchestrator {
 
       if (pass) {
         this.setAgent(tp.id, 'idle');
+        if (usedPlaybookId) learning.markPlaybookUsed(usedPlaybookId);   // đếm uses 1 lần, chỉ khi task đậu
         await this.finishTask(task, nv, tp, brief, lastOutput, score);
         this.active.delete(task.id);
         return;
@@ -521,6 +536,7 @@ class Orchestrator {
       .run(artId, task.mission_id, task.id, nv.id, art.fileName, art.type, art.absPath, version, score, now());
     this.emit('artifact.new', { artifactId: artId, name: art.fileName, icon: ICONS[art.type] || '📄', agentId: nv.id, score });
     this.bumpStats(nv.id, score, false);
+    this.learnFrom(task, output, score);   // đúc kết playbook cho MỌI task đạt điểm cao (kể cả có real_action)
 
     const ra = task.real_action_json ? JSON.parse(task.real_action_json) : null;
     if (ra) {
@@ -544,6 +560,14 @@ class Orchestrator {
     setTimeout(() => this.setAgent(nv.id, 'idle'), 2500);
   }
 
+  /* Chưng cất playbook khi task đạt điểm cao (v4) */
+  learnFrom(task, output, score) {
+    try {
+      const id = learning.distill(task, output, score);
+      if (id) { this.agentLog('coo', `Đúc kết công thức mới từ "${task.title}" (${score}đ) vào playbook phòng`, 'g'); this.emit('playbook.new', { deptId: task.dept_id }); }
+    } catch (e) { log('learnFrom: ' + e.message); }
+  }
+
   /* Ghi sổ kinh doanh khi 1 task hoàn thành → buồng lái tiến hóa (Phase 3) */
   recordBiz(task, agentId) {
     try {
@@ -553,13 +577,24 @@ class Orchestrator {
       this._bizRecorded.add(task.id);
       const dna = this.dna();
       const price = biz.avgPrice(dna);
+      const dnaX = dna;
+      const kw = (task.title + ' ' + (typeof task.brief === 'string' ? task.brief : JSON.stringify(task.brief || ''))).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      const isSales = /chot don|chot|ban hang|tu van|sale|deal/.test(kw);
+      const isLead = /lead|khach tiem nang|cham diem|nuoi duong|pham|phan loai khach/.test(kw);
+      const isCS = /khieu nai|cham soc|cskh|phan hoi|ticket|hoi dap|faq/.test(kw);
       const map = {
         nv_cash: () => biz.record('revenue', `Dự toán tài chính: ${task.title}`, Math.round(price * 400), null, task.mission_id),
         nv_quote: () => biz.record('deal', `Báo giá/hợp đồng: ${task.title}`, Math.round(price * 50 * 10), null, task.mission_id),
-        nv_lead: () => biz.record('lead', `Chấm & lọc lead: ${task.title}`, 20, null, task.mission_id),
+        // NV Chăm Lead làm việc → chấm & đẩy lead qua phễu THẬT (chỉ khi task đúng là về lead)
+        nv_lead: () => { if (!isLead && !isSales) return; const m = crm.advancePipeline(dnaX, task.mission_id); biz.record('lead', `Chấm & lọc lead: ${task.title} (${m.scored} lead)`, m.scored * 20, null, task.mission_id); this.emit('crm.update', {}); },
+        // NV Sales chốt đơn → sinh ĐƠN HÀNG thật (chỉ khi task đúng là bán hàng/chốt đơn)
+        nv_sales: () => { if (!isSales) return; crm.advancePipeline(dnaX, task.mission_id); const d = crm.closeDeals(dnaX, task.mission_id); if (d.closed) { biz.record('order', `Chốt ${d.closed} đơn: ${task.title}`, d.revenue, null, task.mission_id); this.emit('toast', { title: `💰 Chốt được ${d.closed} đơn!`, body: `Doanh thu ${d.revenue.toLocaleString('vi-VN')}đ vào buồng lái`, cls: '' }); } this.emit('crm.update', {}); },
         nv_content: () => biz.record('content', `Nội dung: ${task.title}`, 0, null, task.mission_id),
         nv_ads: () => biz.record('content', `Kịch bản quảng cáo: ${task.title}`, 0, null, task.mission_id),
-        nv_market: () => biz.record('research', `Nghiên cứu thị trường: ${task.title}`, 0, null, task.mission_id)
+        nv_market: () => biz.record('research', `Nghiên cứu thị trường: ${task.title}`, 0, null, task.mission_id),
+        // CSKH làm việc → xử lý ticket đang mở (chỉ khi task về CSKH)
+        nv_script: () => { if (!isCS) return; const n = crm.resolveTickets(dnaX); if (n) { biz.record('cskh', `Xử lý ${n} ticket CSKH: ${task.title}`, 0, null, task.mission_id); this.emit('crm.update', {}); } },
+        nv_faq: () => { if (!isCS) return; const n = crm.resolveTickets(dnaX); if (n) this.emit('crm.update', {}); }
       };
       (map[agentId] || (() => {}))();
     } catch (e) { log('recordBiz err: ' + e.message); }
@@ -598,8 +633,10 @@ class Orchestrator {
         });
         biz.record('email', `Thư gửi khách: ${task.title}`, 0, null, task.mission_id);
       } else if (action.channel === 'mcp:facebook') {
-        // ghi sổ CHIẾN DỊCH đã lên lịch đăng
+        // ghi sổ CHIẾN DỊCH đã lên lịch đăng + SINH LEAD MỚI đổ về từ bài đăng (v4)
         biz.record('campaign', `Bài đăng Fanpage: ${task.title}`, 0, { note: action.note }, task.mission_id);
+        const nLeads = crm.spawnLeads(dna, 4, 'Facebook', task.mission_id).length;
+        if (nLeads) { this.emit('crm.update', { leads: nLeads }); this.emit('toast', { title: `📥 ${nLeads} lead mới đổ về`, body: 'Từ bài đăng vừa duyệt — xem mục Khách hàng', cls: '' }); }
         // kèm file lịch nhắc đăng (mở bằng Calendar)
         art = await buildIcs({
           title: 'Đăng bài: ' + task.title,

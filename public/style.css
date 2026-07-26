@@ -321,4 +321,33 @@ textarea.inp{background:var(--panel2);border:1px solid var(--line2);border-radiu
 .ini-card .ir{color:var(--muted);font-size:12px;margin:6px 0 11px;line-height:1.55}
 .ini-card .ityp{font-size:10px;padding:2px 8px;border-radius:8px;font-weight:700;background:var(--panel3);color:var(--muted)}
 
+/* ===== CRM — PIPELINE KHÁCH HÀNG (v4) ===== */
+.pipe-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px}
+.pipe-col{background:var(--panel);border:1px solid var(--line);border-radius:12px;min-height:80px}
+.pipe-col .ph{padding:10px 12px;font-weight:700;font-size:12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px}
+.pipe-col .ph .cnt{margin-left:auto;background:var(--panel3);border-radius:8px;padding:1px 7px;font-size:10.5px;font-family:'JetBrains Mono',monospace}
+.pipe-col.moi .ph{color:var(--muted)}.pipe-col.am .ph{color:var(--cyan)}.pipe-col.nong .ph{color:var(--amber)}.pipe-col.chot .ph{color:var(--jade)}.pipe-col.mat .ph{color:var(--dim)}
+.pipe-body{padding:8px;display:flex;flex-direction:column;gap:7px;max-height:340px;overflow-y:auto}
+.lead-card{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:11.5px}
+.lead-card .ln{font-weight:600}
+.lead-card .lm{font-size:10px;color:var(--muted);margin-top:3px;display:flex;gap:6px;flex-wrap:wrap}
+.lead-card .lsc{font-family:'JetBrains Mono',monospace;color:var(--amber)}
+.seg-tag{font-size:9.5px;padding:1px 6px;border-radius:7px;background:var(--panel3);color:var(--muted)}
+.tk-open{border-left:3px solid var(--red)}.tk-done{border-left:3px solid var(--jade);opacity:.7}
+
+/* ===== PLAYBOOK ===== */
+.pb-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.pb-item .pbt{font-weight:600;font-size:12px}
+.pb-item .pbp{font-size:11px;color:var(--muted);margin-top:4px;font-family:'JetBrains Mono',monospace;line-height:1.5}
+.pb-item .pbm{font-size:10px;color:var(--dim);margin-top:4px}
+
+/* ===== COMPANY SWITCHER ===== */
+#coDropdown{position:absolute;top:52px;left:14px;z-index:60;background:var(--panel);border:1px solid var(--line2);border-radius:12px;padding:8px;min-width:260px;box-shadow:0 12px 40px rgba(0,0,0,.55);display:none}
+#coDropdown.show{display:block}
+#coDropdown .co-item{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;cursor:pointer;font-size:12.5px}
+#coDropdown .co-item:hover{background:var(--panel3)}
+#coDropdown .co-item.active{background:var(--panel3);color:var(--amber)}
+#coDropdown .co-item .cdot{width:8px;height:8px;border-radius:50%;background:var(--jade)}
+#coDropdown .co-new{border-top:1px solid var(--line);margin-top:6px;padding-top:8px}
+
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

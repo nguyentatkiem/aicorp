@@ -17,6 +17,7 @@
     <div class="logo">AC</div>
     <button class="rail-btn active" data-screen="home">🗺️<span class="tip">Sơ đồ sống</span></button>
     <button class="rail-btn" data-screen="cockpit">🎛️<span class="tip">Buồng lái kinh doanh</span></button>
+    <button class="rail-btn" data-screen="crm">🧲<span class="badge" id="crmbadge" style="display:none">0</span><span class="tip">Khách hàng &amp; Bán hàng</span></button>
     <button class="rail-btn" data-screen="factory">📦<span class="tip">Xưởng sản phẩm</span></button>
     <button class="rail-btn" data-screen="approvals">🔔<span class="badge" id="apbadge" style="display:none">0</span><span class="tip">Hộp phê duyệt</span></button>
     <button class="rail-btn" data-screen="initiatives">💡<span class="badge" id="inibadge" style="display:none">0</span><span class="tip">Sáng kiến của COO</span></button>
@@ -30,9 +31,9 @@
   <div id="main">
     <!-- ========= TOPBAR ========= -->
     <header id="topbar">
-      <div class="co-badge">
+      <div class="co-badge" id="cobadge" style="cursor:pointer" title="Đổi / thêm công ty">
         <div class="co-ava" id="coava">🏢</div>
-        <div><div class="co-name" id="coname">AICORP</div><div class="co-sub">AICORP · Công ty AI</div></div>
+        <div><div class="co-name" id="coname">AICORP</div><div class="co-sub">AICORP · Công ty AI ▾</div></div>
       </div>
       <div class="top-pill"><span class="dot live"></span><b id="missioncount">0</b>&nbsp;nhiệm vụ đang chạy</div>
       <div class="top-pill">⚡ <b id="activeagents">0</b>&nbsp;agent đang hoạt động</div>
@@ -116,6 +117,15 @@
       </div>
     </section>
 
+    <!-- ========= SCREEN: CRM — KHÁCH HÀNG & BÁN HÀNG ========= -->
+    <section class="screen" id="screen-crm">
+      <div class="page">
+        <h2>🧲 Khách hàng &amp; Bán hàng</h2>
+        <div class="psub">Công ty không chỉ tạo file — nó có khách hàng thật, lead chảy qua phễu, ticket cần xử lý và đơn hàng ra doanh thu. Giao việc cho phòng Kinh doanh/CSKH để đội ngũ làm việc trên đây.</div>
+        <div id="crmbody"></div>
+      </div>
+    </section>
+
     <!-- ========= SCREEN: XƯỞNG SẢN PHẨM ========= -->
     <section class="screen" id="screen-factory">
       <div class="page">
@@ -140,6 +150,10 @@
         <h2>👥 Nhân sự AI <button class="btn" id="hirebtn" style="margin-left:auto">＋ Tuyển nhân viên AI mới</button></h2>
         <div class="psub" id="hrsub">Bấm vào từng người trên Sơ đồ sống để xem hồ sơ chi tiết.</div>
         <div class="card"><div id="hrtbl"></div></div>
+        <div class="card"><h3>📘 Playbook — công thức phòng công ty đã tự đúc kết <span class="ftag" style="background:rgba(49,201,126,.12);color:var(--jade)" id="pbcount">0</span></h3>
+          <div class="psub" style="margin:0 0 10px">Mỗi bài làm đạt điểm cao được chưng cất thành công thức, tự nạp cho việc sau → chất lượng tăng dần theo thời gian.</div>
+          <div id="playbooklist"></div>
+        </div>
       </div>
     </section>
 

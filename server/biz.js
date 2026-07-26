@@ -81,10 +81,12 @@ function cockpit(dna) {
   const artifacts = db.prepare('SELECT COUNT(*) c FROM artifacts').get().c;
   const avgQ = db.prepare('SELECT AVG(score) a FROM tasks WHERE score IS NOT NULL').get().a;
 
-  // P&L dự phóng (THÁNG): doanh thu 30 ngày - giá vốn ước (45%) - chi phí AI 30 ngày (cùng cửa sổ)
-  const revMonth = gM('revenue').sum;
+  // P&L dự phóng (THÁNG): ưu tiên DOANH THU THẬT từ đơn hàng CRM (v4); nếu chưa có đơn, ước từ lead
+  let realRevenue = 0;
+  try { realRevenue = require('./crm').revenueMonth(); } catch {}
   const leadMonth = gM('lead').sum || gM('lead').n * 20;
-  const rev = revMonth || Math.round(leadMonth * price * 0.05); // nếu chưa có dự phóng, ước 5% lead chốt
+  const rev = realRevenue || Math.round(leadMonth * price * 0.05);
+  const revIsReal = realRevenue > 0;
   const cogs = Math.round(rev * 0.45);
   const grossProfit = rev - cogs;
   const opProfit = grossProfit - aiCostMonth;
@@ -105,18 +107,21 @@ function cockpit(dna) {
   // Tiến độ mục tiêu 3 tháng (thô): ước từ số việc hoàn thành phục vụ mục tiêu
   const goalProgress = Math.min(100, Math.round(missionsDone * 8 + campaigns * 6 + leads * 4));
 
+  let crmSnap = null; try { crmSnap = require('./crm').pipelineSnapshot(); } catch {}
   return {
     kpi: {
-      projectedRevenue: rev, grossProfit, opProfit, aiCostMonth, aiCostTotal: aiCost,
-      leadCount, campaigns, contentPieces, dealValue, missionsDone, artifacts,
+      projectedRevenue: rev, revIsReal, grossProfit, opProfit, aiCostMonth, aiCostTotal: aiCost,
+      leadCount: crmSnap ? (crmSnap.byStage.moi + crmSnap.byStage.am + crmSnap.byStage.nong) : leadCount,
+      campaigns, contentPieces, dealValue, missionsDone, artifacts, orders: crmSnap ? crmSnap.ordersN : 0,
+      customers: crmSnap ? crmSnap.customersN : 0, openTickets: crmSnap ? crmSnap.openTickets : 0,
       avgQuality: avgQ ? Math.round(avgQ * 10) / 10 : null, price, goalProgress
     },
     pnl: [
-      { row: 'Doanh thu dự phóng (tháng)', value: rev, kind: 'pos' },
+      { row: revIsReal ? 'Doanh thu THẬT từ đơn (tháng)' : 'Doanh thu dự phóng (tháng)', value: rev, kind: 'pos' },
       { row: 'Giá vốn hàng bán (~45%)', value: -cogs, kind: 'neg' },
       { row: 'Lãi gộp', value: grossProfit, kind: 'sub' },
       { row: 'Chi phí vận hành AI (tháng)', value: -aiCostMonth, kind: 'neg' },
-      { row: 'Lợi nhuận hoạt động dự phóng', value: opProfit, kind: opProfit >= 0 ? 'sub' : 'negsub' }
+      { row: 'Lợi nhuận hoạt động' + (revIsReal ? '' : ' dự phóng'), value: opProfit, kind: opProfit >= 0 ? 'sub' : 'negsub' }
     ],
     trend, events,
     goal: (dna || {}).goal_3m || ''

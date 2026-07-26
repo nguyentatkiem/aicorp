@@ -24,6 +24,12 @@ Lần đầu mở sẽ vào **khảo sát DNA 7 bước** (~5 phút). Bấm "✨
 
 Gói Sub Claude (Pro/Max) qua Agent SDK: lộ trình v2.
 
+## Doanh nghiệp có khách hàng, tự học, nhiều công ty (v4)
+
+- **CRM sống (🧲):** công ty có khách hàng thật, lead chảy qua phễu (Mới → Ấm → Nóng → Chốt), ticket CSKH và đơn hàng. Duyệt bài đăng → lead đổ về; giao "chấm lead" → đẩy phễu; giao "tư vấn chốt đơn" → **chốt lead nóng thành đơn → doanh thu THẬT**. Buồng lái lấy doanh thu từ đơn hàng thay vì ước lượng.
+- **Công ty tự học (📘 Playbook):** mỗi bài đạt ≥95 điểm được **chưng cất thành "công thức phòng"**, tự nạp cho việc sau cùng phòng/định dạng → chất lượng tăng dần. COO tự đánh giá hiệu suất, đề xuất **nâng vai người giỏi / đào tạo lại người kém**.
+- **Đa công ty:** quản nhiều doanh nghiệp, **mỗi công ty dữ liệu cách ly hoàn toàn** (thư mục riêng), chuyển qua lại từ chip công ty trên thanh trên cùng. API key dùng chung.
+
 ## Công ty SỐNG (Phase 3 — v3)
 
 Biến AICORP từ "chạy nhiệm vụ" thành **doanh nghiệp đang vận hành**:
@@ -68,7 +74,9 @@ Biến AICORP từ "chạy nhiệm vụ" thành **doanh nghiệp đang vận hà
 
 ```
 server/
-  db.js            SQLite (better-sqlite3) — schema chương 3 + Phase 3 · dữ liệu tại ~/AICORP/
+  db.js            SQLite (better-sqlite3) — schema ch3 + Phase 3 + v4 · registry đa công ty · dữ liệu ~/AICORP/
+  crm.js           CRM sống — khách hàng, lead pipeline, ticket, đơn hàng → doanh thu thật
+  learning.js      Vòng học — chưng cất playbook + đánh giá hiệu suất nhân sự
   seed.js          7 phòng ban · 25 agent · nạp skill từ skills-seed/
   engine.js        EngineProvider kép: ClaudeEngine (API) / DemoEngine (offline, module hóa)
   demo/            planner + 7 module phòng ban + meeting (họp) + initiative (sáng kiến) + gợi ý 12 ngành
@@ -97,8 +105,9 @@ AICORP_NO_OPEN=1 AICORP_HOME=/tmp/aicorp-test npm start
 npm run smoke        # nghiệm thu nhanh (~3 phút)
 npm test             # 40 test tích hợp toàn tính năng (~10 phút)
 npm run test:phase3  # 21 test công ty sống (handoff, buồng lái, họp, sáng kiến, .eml/.ics)
+npm run test:v4      # 20 test CRM + vòng học + đa công ty
 npm run test:audit   # 9 test hồi quy các lỗi audit đã vá
 npm run test:ui      # UI test Chrome headless (cần Google Chrome)
 ```
 
-Kết quả mới nhất: **smoke ✓ · full 40/40 ✓ · phase3 21/21 ✓ · audit-fix 9/9 ✓ · UI smoke ✓**. Qua 2 vòng audit đối kháng (30 + 13 lỗi thật đã vá).
+Kết quả mới nhất: **smoke ✓ · full 40/40 ✓ · phase3 21/21 ✓ · v4 20/20 ✓ · audit-fix 9/9 ✓ · UI smoke ✓**. Qua 3 vòng audit đối kháng (30 + 13 + 16 lỗi thật đã vá).

@@ -171,6 +171,32 @@ Bạn cũng có thể bấm **"Nhờ COO rà soát ngay"** để COO xem xét v�
 
 ---
 
+## 7d. 🧲 Khách hàng & Bán hàng (CRM)
+
+Bấm biểu tượng 🧲. Công ty không chỉ tạo file — nó có **khách hàng thật và một phễu bán hàng sống**:
+
+- **Phễu bán hàng** 5 cột: Mới → Ấm → Nóng → Đã chốt → Đã mất. Lead chảy qua từng giai đoạn.
+- Duyệt một **bài đăng Facebook** trong Hộp phê duyệt → lead mới tự đổ về cột "Mới".
+- Giao việc **"chấm điểm lead"** cho phòng Kinh doanh → lead được đẩy từ Mới/Ấm lên Nóng.
+- Giao việc **"tư vấn chốt đơn"** → lead Nóng được chốt thành **đơn hàng thật**, ra doanh thu (bạn thấy ngay ở Buồng lái).
+- **Ticket CSKH** tự phát sinh khi có khách mua; giao việc chăm sóc khách → ticket được xử lý.
+
+Đây là lý do khi bạn giao "chuẩn bị ra mắt sản phẩm", cả công ty vận hành như thật: marketing kéo khách → sales chốt đơn → CSKH chăm sóc → doanh thu vào sổ.
+
+---
+
+## 7e. 📘 Công ty tự học (Playbook)
+
+Trong màn 👥 Nhân sự AI, kéo xuống mục **Playbook**. Mỗi khi một bài đạt điểm rất cao (≥95), công ty **tự đúc kết nó thành "công thức phòng"** và dùng lại cho việc sau — nên càng dùng lâu, chất lượng càng lên. COO cũng tự nhắc bạn nên **nâng vai người làm giỏi** hoặc **đào tạo lại người hay bị trả bài**.
+
+---
+
+## 7f. 🏢 Điều hành nhiều công ty
+
+Bạn quản nhiều doanh nghiệp? Bấm vào **tên công ty ở góc trên bên trái** (có mũi tên ▾) để mở danh sách. Từ đây bạn **chuyển qua công ty khác** hoặc **➕ Thêm công ty mới**. Mỗi công ty có dữ liệu **hoàn toàn riêng biệt** (khách hàng, nhân sự, file, bộ nhớ) — không lẫn lộn. Khi chuyển hoặc tạo công ty, app sẽ tự thoát; bạn chạy lại `npm start` là vào công ty đã chọn. (API key dùng chung cho mọi công ty.)
+
+---
+
 ## 8. 👥 Quản trị nhân sự AI
 
 Bấm biểu tượng 👥 để mở danh sách toàn bộ nhân viên: phòng ban, cấp model, số việc đã xong, điểm trung bình, tỷ lệ bị trả lại, trạng thái hiện tại. Bạn quản họ như quản người thật:
