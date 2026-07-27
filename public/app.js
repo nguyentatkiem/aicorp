@@ -525,13 +525,14 @@ async function refreshConnect() {
 }
 
 /* ================= MCP GATEWAY — KẾT NỐI DOANH NGHIỆP ================= */
-let MCP_CATALOG = [];
+let MCP_CATALOG = [], MCP_SERVERS = [];
 const MCP_DEPTS = [['mkt', 'MKT'], ['kd', 'KD'], ['tckt', 'TC'], ['ns', 'NS'], ['cskh', 'CSKH'], ['vh', 'VH'], ['data', 'DATA']];
 const mcpStatusIcon = s => s === 'connected' ? '🟢' : s === 'error' ? '🔴' : '⚪';
 
 async function refreshMCP() {
   const d = await api('/mcp');
   MCP_CATALOG = d.catalog || [];
+  MCP_SERVERS = d.servers || [];
   $('#mcptoolcount').textContent = `${d.servers.length} kết nối · ${d.toolCount} công cụ`;
   const list = $('#mcplist');
   if (!d.servers.length) { list.innerHTML = `<div class="psub">Chưa có kết nối nào. Bấm <b>＋ Thêm kết nối</b> — chọn từ danh mục gợi ý (Filesystem, Slack, GitHub, n8n…) hoặc nhập lệnh MCP tùy ý.</div>`; return; }
@@ -546,7 +547,7 @@ async function refreshMCP() {
         <span style="margin-left:auto;display:flex;gap:6px">
           <button class="btn ghost" style="padding:3px 9px;font-size:11px" onclick="mcpConnect('${sv.id}')">🔄 Nối lại</button>
           <div class="toggle ${sv.enabled ? 'on' : ''}" onclick="mcpToggle('${sv.id}',this)"></div>
-          <button class="btn ghost" style="padding:3px 9px;font-size:11px" onclick="mcpRemove('${sv.id}','${escAttr(sv.name)}')">🗑</button>
+          <button class="btn ghost" style="padding:3px 9px;font-size:11px" onclick="mcpRemove('${sv.id}')">🗑</button>
         </span>
       </div>
       ${sv.error ? `<div style="color:var(--red);font-size:11.5px;margin-top:5px">⚠️ ${esc(sv.error)}</div>` : ''}
@@ -554,6 +555,13 @@ async function refreshMCP() {
       <div style="margin-top:7px"><span class="psub">Phòng được dùng: </span>${chips}</div>` : ''}
     </div>`;
   }).join('');
+  // Kết quả THẬT — bằng chứng các lần gọi tool MCP đã được CEO duyệt
+  const acts = d.actions || [];
+  $('#mcpresults').innerHTML = acts.length ? `<h3 style="margin:16px 0 8px;font-size:14px">📊 Kết quả thật gần đây (${acts.length})</h3>` + acts.map(a => `
+     <div style="border-left:3px solid ${a.isError ? 'var(--red)' : 'var(--jade)'};padding:6px 11px;margin-bottom:7px;background:var(--panel2);border-radius:0 8px 8px 0">
+       <div style="font-size:12px"><b>${a.isError ? '⚠️' : '✅'} ${esc(a.tool)}</b> <span class="psub">trên ${esc(a.serverName)} · ${a.at ? new Date(a.at).toLocaleString('vi-VN') : ''}</span></div>
+       <div style="font-size:11.5px;color:var(--muted);margin-top:3px;white-space:pre-wrap;max-height:70px;overflow:auto">${esc((a.result || '').slice(0, 400))}</div>
+     </div>`).join('') : '';
 }
 
 window.mcpAssignDept = async (serverId, deptId, on) => {
@@ -566,7 +574,7 @@ window.mcpAssignDept = async (serverId, deptId, on) => {
 };
 window.mcpConnect = async id => { toast('🔄 Đang kết nối…', ''); const r = await post(`/mcp/servers/${id}/connect`, {}); toast(r.ok ? '🟢 Đã kết nối' : '🔴 Lỗi kết nối', r.ok ? `${r.tools.length} công cụ` : (r.error || '').slice(0, 80), r.ok ? '' : 'red'); refreshMCP(); };
 window.mcpToggle = async (id, elx) => { const r = await post(`/mcp/servers/${id}/toggle`, {}); elx.classList.toggle('on', !!r.enabled); refreshMCP(); };
-window.mcpRemove = async (id, name) => { if (!confirm(`Xoá kết nối "${name}"? Khoá/token của nó cũng bị xoá.`)) return; await api('/mcp/servers/' + id, { method: 'DELETE' }); toast('🗑 Đã xoá kết nối', name); refreshMCP(); };
+window.mcpRemove = async (id) => { const name = (MCP_SERVERS.find(s => s.id === id) || {}).name || 'kết nối này'; if (!confirm(`Xoá "${name}"? Khoá/token của nó cũng bị xoá.`)) return; await api('/mcp/servers/' + id, { method: 'DELETE' }); toast('🗑 Đã xoá kết nối', name); refreshMCP(); };
 
 function mcpOpenAdd() {
   const f = $('#mcpform');
@@ -786,6 +794,7 @@ function connectSocket() {
   socket.on('crm.update', () => { refreshCRMBadge(); if ($('#screen-crm').classList.contains('active')) debounce('crm', refreshCRM, 500); if ($('#screen-cockpit').classList.contains('active')) debounce('cockpit', refreshCockpit, 600); });
   socket.on('playbook.new', () => { if ($('#screen-hr').classList.contains('active')) refreshPlaybooks(); });
   socket.on('mcp.update', () => { if ($('#screen-connect').classList.contains('active')) refreshMCP(); });
+  socket.on('mcp.result', () => { if ($('#screen-connect').classList.contains('active')) refreshMCP(); });
   socket.on('brain2.new', () => { if ($('#screen-brain2').classList.contains('active')) debounce('b2', () => refreshBrain2(true), 600); });
 }
 const debTimers = {};

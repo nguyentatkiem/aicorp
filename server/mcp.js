@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
 CREATE TABLE IF NOT EXISTS mcp_assign (
   server_id TEXT, tool_name TEXT, dept_id TEXT,
   PRIMARY KEY(server_id, tool_name, dept_id));
+CREATE TABLE IF NOT EXISTS mcp_actions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, mission_id TEXT, task_id TEXT,
+  server_id TEXT, server_name TEXT, tool TEXT, params_json TEXT,
+  result_text TEXT, is_error INTEGER DEFAULT 0, at TEXT);
 `);
 
 /* ---------- nạp SDK ESM (cache) ---------- */
@@ -101,6 +105,7 @@ function connectServer(id) {
 async function _connectServer(id) {
   const r = row(id);
   if (!r) throw new Error('Không tìm thấy kết nối');
+  if (!r.enabled) throw new Error('Kết nối đang tắt');   // chặn spawn tiến trình con khi server đã tắt
   await disconnect(id);
   const S = await sdk();
   let transport = null, client = null;
@@ -215,6 +220,23 @@ const CATALOG = [
   { key: 'n8n', name: 'n8n (400+ app) qua MCP', dept: 'vh', transport: 'sse', url: 'http://localhost:5678/mcp/aicorp/sse', env: { __authHeader: '' }, secret: true, note: 'Cầu nối tới Zalo/Shopee/TikTok Shop… qua n8n. Dán URL MCP Trigger của n8n + header xác thực nếu có.' }
 ];
 
+function serverName(id) { const r = row(id); return r ? r.name : id; }
+
+/* Nhật ký "kết quả thật" — mỗi lần gọi tool MCP được duyệt (bằng chứng cho CEO) */
+function logAction({ missionId, taskId, serverId, tool, params, resultText, isError }) {
+  db.prepare(`INSERT INTO mcp_actions(mission_id,task_id,server_id,server_name,tool,params_json,result_text,is_error,at)
+    VALUES(?,?,?,?,?,?,?,?,?)`)
+    .run(missionId || null, taskId || null, serverId || null, serverName(serverId), tool || '',
+      JSON.stringify(params || {}), String(resultText || '').slice(0, 4000), isError ? 1 : 0, now());
+}
+function recentActions(limit = 30) {
+  return db.prepare('SELECT * FROM mcp_actions ORDER BY id DESC LIMIT ?').all(limit).map(a => ({
+    id: a.id, mission_id: a.mission_id, task_id: a.task_id, serverName: a.server_name, tool: a.tool,
+    params: (() => { try { return JSON.parse(a.params_json); } catch { return {}; } })(),
+    result: a.result_text, isError: !!a.is_error, at: a.at
+  }));
+}
+
 function count() { return db.prepare("SELECT COUNT(*) c FROM mcp_servers WHERE enabled=1").get().c; }
 function toolCount() { return listServers().filter(s => s.status === 'connected').reduce((n, s) => n + s.tools.length, 0); }
 
@@ -229,5 +251,6 @@ async function closeAll() { for (const id of [...live.keys()]) await disconnect(
 
 module.exports = {
   listServers, addServer, removeServer, toggleServer, connectServer, disconnect,
-  callTool, assign, toolbeltFor, setSecrets, CATALOG, count, toolCount, bootConnect, closeAll, validId
+  callTool, assign, toolbeltFor, setSecrets, CATALOG, count, toolCount, bootConnect, closeAll, validId,
+  serverName, logAction, recentActions
 };

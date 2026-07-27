@@ -250,7 +250,9 @@ Bấm biểu tượng 🕸️. Nếu Company Brain (🧠) là "kho hồ sơ", th
 - **Trạng thái:** 🟢 đã nối · 🔴 lỗi (xem thông báo) · ⚪ chưa nối. Bấm **🔄 Nối lại** nếu cần.
 - **An toàn:** mọi hành động ra thế giới thật vẫn phải qua 🔔 Hộp phê duyệt. Nếu bạn phơi app ra internet (Cloudflare Tunnel), hãy đặt mật khẩu — vì cấu hình kết nối MCP là quyền mạnh.
 
-> Hiện tại là **Pha A** (nền tảng kết nối). Bước tiếp theo: nhân viên AI sẽ tự dùng các công cụ này để **gửi email thật, đăng bài thật, tạo đơn thật** — và kết quả (mã đơn, link bài…) chảy ngược vào buồng lái & CRM.
+**Hành động thật (Pha B — đã có):** khi một phòng đã được gán công cụ MCP, lúc nhân viên AI hoàn thành việc cần "hành động thật", **Hộp phê duyệt sẽ hiện đúng công cụ và tham số sẽ chạy** (vd: sẽ ghi tệp gì, gửi cho ai). Bạn bấm **Duyệt & chạy thật** → AICORP **gọi công cụ thật** → kết quả (đường dẫn tệp, mã, nội dung trả về) hiện ngay trong khối **📊 Kết quả thật** ở màn Kết nối và được lưu làm bằng chứng vào Bộ não thứ 2. Nếu chưa duyệt thì không có gì chạy — bạn luôn là người quyết định.
+
+> Ví dụ chạy thử ngay: thêm kết nối **Filesystem** (trỏ vào thư mục workspace), gán công cụ **write_file** cho phòng Marketing, rồi giao "viết bài và đăng fanpage". Khi duyệt, AICORP sẽ **ghi một tệp thật** chứa bài viết — đó là "kết quả thật" đầu tiên.
 
 ---
 

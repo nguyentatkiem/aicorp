@@ -13,6 +13,7 @@
     "test:sub": "node scripts/test-sub.js",
     "test:brain2": "node scripts/test-brain2.js",
     "test:mcp": "node scripts/test-mcp.js",
+    "test:mcp-b": "node scripts/test-mcp-b.js",
     "test:audit": "node scripts/test-audit-fixes.js",
     "test:ui": "node scripts/ui-smoke.js"
   },

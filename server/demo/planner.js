@@ -504,7 +504,8 @@ function detectRealActions(norm) {
   // 'post' đứng một mình quá dễ dương tính giả → chỉ bắt cụm rõ nghĩa "đăng…"
   const fb = hasAny(norm, ['dang bai', 'dang len', 'len fanpage', 'dang fanpage', 'dang facebook', 'dang ngay', 'dang luon', 'dang post', 'post bai', 'post len']);
   const gm = hasAny(norm, ['gui mail', 'gui email', 'email cho khach', 'mail cho khach', 'gui thu cho khach']);
-  return { fb, gm };
+  const fx = hasAny(norm, ['xuat ra tep', 'xuat ra file', 'luu ra tep', 'luu ra file', 'ghi ra tep', 'ghi ra file', 'xuat file', 'xuat tep', 'luu file', 'luu thanh tep', 'xuat bao cao', 'ket xuat', 'export ra']);
+  return { fb, gm, fx };
 }
 
 /* ================= 5. plan(command, ctx) ========================== */
@@ -634,6 +635,13 @@ function plan(command, ctx) {
       channel: 'mcp:gmail', op: 'send_mail',
       note: `Gửi email cho khách hàng về ${D.prod(dna)} sau khi CEO duyệt trong Hộp phê duyệt`
     };
+  }
+  if (act.fx) {
+    // "xuất/lưu ra tệp" → hành động ghi tệp thật (kênh mcp:file). Nếu phòng có công cụ write_file
+    // (MCP) sẽ ghi tệp THẬT khi duyệt; nếu không, giữ như hành động thật thông thường.
+    let i = tasks.findIndex(t => t._key === 'content' || t._key === 'report');
+    if (i === -1) i = tasks.length - 1;
+    if (i >= 0 && !tasks[i].real_action) tasks[i].real_action = { channel: 'mcp:file', op: 'write_file', note: `Xuất kết quả "${tasks[i].title}" ra tệp` };
   }
 
   return { tasks: tasks.map(({ _key, ...t }) => t) };

@@ -33,7 +33,7 @@ Nâng AICORP từ "mô phỏng" thành **tầng điều hành AI đặt lên ph�
 - **Danh mục gợi ý** điền sẵn cấu hình: Filesystem, Memory, GitHub, Slack, PostgreSQL, n8n (cầu tới 400+ app: Zalo/Shopee/TikTok Shop…). Hoặc nhập lệnh MCP tùy ý.
 - **Bí mật cất trên máy bạn** ở `~/AICORP/secret/mcp/<id>.json` (quyền 600) — không vào DB/API/backup. Mọi route đổi trạng thái qua `sameOrigin`.
 - Màn **🔌 Kết nối** → khối "Kết nối doanh nghiệp (MCP)": thêm/kết nối/gán phòng/xoá. Test: `npm run test:mcp` (nối MCP server thật, khám phá + gọi tool thật).
-- Đây là **Pha A** (nền tảng Gateway). Pha B: Cổng phê duyệt gọi thẳng công cụ MCP thật (gửi email/đăng bài/tạo đơn) rồi **kết quả thật chảy ngược** vào CRM/buồng lái/bộ não.
+- **Pha B — HÀNH ĐỘNG THẬT (đã có):** khi phòng có công cụ MCP được gán, "hành động thật" của nhiệm vụ được **nâng thành lời gọi tool MCP**. Cổng phê duyệt hiện **đúng tool + tham số sẽ chạy**; CEO duyệt → AICORP **gọi tool THẬT** (`mcp.callTool`) → **kết quả thật** (đường dẫn tệp/message-id/nội dung) ghi vào nhật ký "📊 Kết quả thật" + Bộ não thứ 2 làm bằng chứng. Engine thật: agent tự đề xuất tool qua khối ` ```mcp ` (chỉ tool đã gán cho phòng mình). Demo: có write_file → ghi deliverable ra tệp thật. Test: `npm run test:mcp-b` (giao việc → duyệt → **tệp thật xuất hiện trên đĩa**).
 
 ## Bộ não thứ 2 — tri thức liên kết kiểu Obsidian (v6, 🕸️)
 

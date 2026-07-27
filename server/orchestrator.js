@@ -3,7 +3,7 @@
    approval gate, budget guard, checkpoint & resume. Phát sự kiện WebSocket theo quy ước 2.4 */
 const fs = require('fs');
 const path = require('path');
-const { db, uid, now, getSetting, setSetting, getCredentials, log } = require('./db');
+const { db, DIRS, uid, now, getSetting, setSetting, getCredentials, log } = require('./db');
 const { makeEngine, parseJson } = require('./engine');
 const P = require('./prompts');
 const { buildArtifact, buildEml, buildIcs, ICONS } = require('./artifacts');
@@ -12,6 +12,7 @@ const crm = require('./crm');
 const learning = require('./learning');
 const secondbrain = require('./secondbrain');
 const noteContent = require('./demo/note-content');
+const mcp = require('./mcp');
 let INITIATIVE = null, MEETING = null;
 try { INITIATIVE = require('./demo/initiative'); } catch {}
 try { MEETING = require('./demo/meeting'); } catch {}
@@ -438,7 +439,13 @@ class Orchestrator {
     let round = task.review_round || 0;
     let lastOutput = null, lastScore = 0;
     // Prompt hệ thống bất biến theo vòng review (nv/dna/skill/brainSearch không đổi) → tính 1 lần
-    const execSystem = P.agentSystem(nv, dna, this.skillTextFor(nv), this.brainSearch(task.title + ' ' + (brief.muc_tieu || '')));
+    // Pha B: cho agent biết "túi công cụ thật" (MCP) của phòng — có thể đề xuất gọi bằng khối ```mcp
+    let beltNote = '';
+    try {
+      const belt = mcp.toolbeltFor(task.dept_id);
+      if (belt.length) beltNote = '\n\n🏢 CÔNG CỤ THẬT (MCP) phòng bạn có thể dùng để tạo kết quả thật — nếu cần, thêm vào cuối câu trả lời một khối:\n```mcp\n{"tool":"<tên>","params":{...}}\n```\nDanh sách: ' + belt.map(t => `${t.name} (${(t.description || '').slice(0, 50)})`).join('; ');
+    } catch {}
+    const execSystem = P.agentSystem(nv, dna, this.skillTextFor(nv), this.brainSearch(task.title + ' ' + (brief.muc_tieu || '')) + beltNote);
 
     while (true) {
       /* --- NV thực thi --- */
@@ -557,17 +564,34 @@ class Orchestrator {
     this.bumpStats(nv.id, score, false);
     this.learnFrom(task, output, score);   // đúc kết playbook cho MỌI task đạt điểm cao (kể cả có real_action)
 
-    const ra = task.real_action_json ? JSON.parse(task.real_action_json) : null;
-    if (ra) {
-      /* Hành động thật → Approval Gate (chương 9) */
+    const ra0 = task.real_action_json ? JSON.parse(task.real_action_json) : null;
+    // engine thật: agent có thể chỉ định lời gọi tool MCP trong khối ```mcp {json} ``` → gắn vào real_action
+    if (ra0) {
+      const mm = String(output || '').match(/```mcp\s*([\s\S]*?)```/);
+      if (mm) { try { const j = JSON.parse(mm[1]); if (j && j.tool && !ra0.mcp) ra0.mcp = j; } catch {} }
+    }
+    if (ra0) {
+      /* Hành động thật → Approval Gate (chương 9). Pha B: nếu phòng có công cụ MCP gán → nâng
+         thành lời gọi tool THẬT (duyệt là chạy thật, kết quả chảy ngược). */
+      const ra = this.mcpUpgradeAction(task, ra0, output);
+      const isMcp = ra.kind === 'mcp';
       this.setTask(task, 'waiting_approval', { score });
-      this.createApproval(task, 'real_action',
-        `📣 Xin phép HÀNH ĐỘNG THẬT: ${ra.note || ra.op}`,
-        `${nv.name} (${this.deptName(task.dept_id)}) hoàn thành "${task.title}", ${tp.name} chấm ${score}/100. Kênh: ${ra.channel}. Mọi hành động thật đều chờ sếp bấm nút — AI không bao giờ tự ý.`,
-        [{ key: 'approve', label: '✔ Duyệt & thực hiện' }, { key: 'reject', label: '✖ Không thực hiện' }],
+      const title = isMcp ? `🏢 Xin phép HÀNH ĐỘNG THẬT qua MCP: ${ra.note || ra.tool}`
+        : `📣 Xin phép HÀNH ĐỘNG THẬT: ${ra.note || ra.op}`;
+      // Hiện MỌI tham số theo từng khoá (không cắt cả cụm → agent không thể đẩy khoá nguy hiểm ra ngoài tầm nhìn).
+      // context được UI escape khi hiển thị (esc(r.context)) nên ở đây để text THÔ, không esc/không HTML.
+      const _p = (ra.params && typeof ra.params === 'object') ? ra.params : {};
+      const paramStr = Object.keys(_p).length
+        ? Object.entries(_p).map(([k, v]) => { const s = typeof v === 'string' ? v : JSON.stringify(v); return k + '=' + (s.length > 140 ? s.slice(0, 140) + '…(+' + (s.length - 140) + ' ký tự)' : s); }).join('  ·  ')
+        : '(không có tham số)';
+      const ctx = isMcp
+        ? `${nv.name} (${this.deptName(task.dept_id)}) hoàn thành "${task.title}", ${tp.name} chấm ${score}/100. Duyệt là GỌI CÔNG CỤ THẬT "${ra.tool}" trên kết nối "${mcp.serverName(ra.serverId)}".\nTham số → ${paramStr}`
+        : `${nv.name} (${this.deptName(task.dept_id)}) hoàn thành "${task.title}", ${tp.name} chấm ${score}/100. Kênh: ${ra.channel}. Mọi hành động thật đều chờ sếp bấm nút — AI không bao giờ tự ý.`;
+      this.createApproval(task, 'real_action', title, ctx,
+        [{ key: 'approve', label: isMcp ? '✔ Duyệt & chạy thật' : '✔ Duyệt & thực hiện' }, { key: 'reject', label: '✖ Không thực hiện' }],
         output.slice(0, 1200), ra);
       this.setAgent(nv.id, 'done', `Xong (${score}/100) — chờ CEO duyệt hành động thật`);
-      this.setAgent('coo', 'wait', `Xin CEO duyệt: ${ra.note || ra.op}`);
+      this.setAgent('coo', 'wait', `Xin CEO duyệt: ${ra.note || ra.tool || ra.op}`);
     } else {
       this.setTask(task, 'done', { score });
       db.prepare('UPDATE tasks SET done_at=? WHERE id=?').run(now(), task.id);
@@ -825,17 +849,45 @@ class Orchestrator {
           // "Sửa" (chương 9.2): bản CEO sửa là bản chạy — sinh artifact phiên bản mới
           await this.regenArtifact(task, editedText.trim(), 'CEO sửa nội dung trước khi duyệt');
         }
-        this.setTask(task, 'done');
-        db.prepare('UPDATE tasks SET done_at=? WHERE id=?').run(now(), task.id);
-        this.taskEvent(task.id, 'coo', 'real_action', { approvalId, action: ap.action_json, executed: true, mode: 'mock', edited: st === 'edited' });
-        db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
-          .run('decision', `CEO đã duyệt: ${ap.title}${note ? ' — ghi chú: ' + note : ''}`, ap.mission_id, now());
-        this.setAgent('coo', 'work', 'CEO đã duyệt — chuyển lệnh cho kênh thực thi');
-        this.emit('toast', { title: '✅ Đã thực hiện (mô phỏng MCP)', body: ap.title, cls: '' });
         // đọc lại task từ DB để n8n nhận đúng BẢN CEO ĐÃ SỬA (regenArtifact vừa cập nhật output_ref)
         const freshTask = db.prepare('SELECT * FROM tasks WHERE id=?').get(task.id);
-        await this.fireN8n(ap, freshTask);
-        await this.emitRealArtifact(ap, freshTask); // sinh .eml/.ics thật + ghi sổ chiến dịch
+        let action = null; try { action = ap.action_json ? JSON.parse(ap.action_json) : null; } catch {}
+        const markDone = () => {
+          this.setTask(task, 'done');
+          db.prepare('UPDATE tasks SET done_at=? WHERE id=?').run(now(), task.id);
+          db.prepare('INSERT INTO memories(kind,text,source_mission,created_at) VALUES(?,?,?,?)')
+            .run('decision', `CEO đã duyệt: ${ap.title}${note ? ' — ghi chú: ' + note : ''}`, ap.mission_id, now());
+        };
+        if (action && action.kind === 'mcp') {
+          // CEO sửa → áp bản sửa vào ĐÚNG tham số văn bản của tool (không chỉ 'content').
+          if (st === 'edited' && editedText && editedText.trim()) {
+            const BODY_KEYS = ['content', 'text', 'body', 'message', 'markdown', 'html', 'code'];
+            const tp = (action.textParam && action.params && typeof action.params[action.textParam] === 'string') ? action.textParam
+              : BODY_KEYS.find(k => action.params && typeof action.params[k] === 'string');
+            if (tp) action.params[tp] = editedText.trim();
+            else {
+              // KHÔNG map được bản sửa → CHẶN, tránh gửi bản cũ (UI đã hứa "bản sếp sửa sẽ chạy")
+              this.chat('coo', `⚠️ Không áp được bản sửa vào tham số công cụ <code>${esc(action.tool)}</code> — em huỷ hành động để tránh gửi bản cũ ạ. Sếp làm lại nếu cần.`, ap.mission_id);
+              this.setTask(task, 'todo');
+              if (this.mission(ap.mission_id).status === 'waiting_approval') this.setMission(ap.mission_id, 'running');
+              setTimeout(() => this.tick(), 600);
+              return { ok: true };
+            }
+          }
+          const ok = await this.runMcpAction(ap, freshTask, action);   // GỌI TOOL MCP THẬT
+          if (ok) markDone();
+          else {
+            // gọi tool thất bại → KHÔNG đánh dấu done giả; đưa task về "làm lại" (runMcpAction đã báo lỗi + ghi nhật ký)
+            this.setTask(task, 'failed');
+          }
+        } else {
+          markDone();
+          this.taskEvent(task.id, 'coo', 'real_action', { approvalId, action: ap.action_json, executed: true, mode: 'mock', edited: st === 'edited' });
+          this.setAgent('coo', 'work', 'CEO đã duyệt — chuyển lệnh cho kênh thực thi');
+          this.emit('toast', { title: '✅ Đã thực hiện (mô phỏng MCP)', body: ap.title, cls: '' });
+          await this.fireN8n(ap, freshTask);
+          await this.emitRealArtifact(ap, freshTask); // sinh .eml/.ics thật + ghi sổ chiến dịch
+        }
       } else if (note && note.trim()) {
         // từ chối KÈM LÝ DO → task quay lại NV làm lại theo góp ý CEO (chương 9.3)
         const brief = JSON.parse(task.brief || '{}');
@@ -984,6 +1036,61 @@ class Orchestrator {
       const slug = secondbrain.capture({ title: gen.title, body: gen.body, tags: gen.tags, type: gen.type, source: 'mission:' + mission.id, entities: gen.entities });
       if (slug) { this.agentLog('coo', `Ghi tri thức mới vào Bộ não thứ 2: "${gen.title}"`, 'g'); this.emit('brain2.new', { slug }); }
     } catch (e) { log('captureBrain: ' + e.message); }
+  }
+
+  /* ============ PHA B — HÀNH ĐỘNG THẬT QUA MCP ============ */
+  /* Nâng "hành động thật" thành lời gọi tool MCP nếu phòng có công cụ phù hợp được gán.
+     - Ưu tiên tool agent (engine thật) tự chọn: ra.mcp = {serverId,tool,params}.
+     - Mặc định (demo): nếu phòng có write_file → ghi deliverable ra tệp THẬT (bằng chứng: đường dẫn). */
+  mcpUpgradeAction(task, ra, output) {
+    try {
+      const belt = mcp.toolbeltFor(task.dept_id);
+      if (!belt.length) return ra;
+      // (a) engine thật: agent tự chỉ định tool qua khối ```mcp — CHỈ chấp nhận tool ĐÃ GÁN cho phòng
+      //     (không tin serverId agent tự đặt → phải khớp một cặp (serverId,tool) trong túi công cụ)
+      if (ra && ra.mcp && ra.mcp.tool) {
+        const hit = belt.find(t => t.name === ra.mcp.tool && (!ra.mcp.serverId || t.serverId === ra.mcp.serverId));
+        if (hit) return { kind: 'mcp', serverId: hit.serverId, tool: hit.name, params: (ra.mcp.params && typeof ra.mcp.params === 'object') ? ra.mcp.params : {}, textParam: ra.mcp.textParam || null, note: ra.note || hit.name, channel: ra.channel };
+        return ra;   // tool không được gán cho phòng → KHÔNG cho gọi (giữ nguyên/mock)
+      }
+      // (b) hành động "xuất/lưu ra tệp" → ghi deliverable ra tệp THẬT. KHÔNG đụng kênh kinh doanh
+      //     (mcp:facebook/mcp:gmail/n8n vẫn theo luồng mock — chờ agent engine thật gọi tool tương ứng).
+      const isExport = ra && (ra.channel === 'mcp:file' || ra.op === 'write_file');
+      if (isExport) {
+        const wf = belt.find(t => t.name === 'write_file' || t.name === 'create_file');
+        if (wf) {
+          const slug = String(task.title || 'ket-qua').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'ket-qua';
+          const outDir = path.join(DIRS.workspace, 'mcp-out');
+          try { fs.mkdirSync(outDir, { recursive: true }); } catch {}
+          const fpath = path.join(outDir, `${slug}-${task.id}.md`);
+          return { kind: 'mcp', serverId: wf.serverId, tool: wf.name, params: { path: fpath, content: String(output || '').slice(0, 12000) }, textParam: 'content', note: `Ghi kết quả "${task.title}" ra tệp thật qua MCP`, channel: ra.channel };
+        }
+      }
+    } catch (e) { log('mcpUpgradeAction: ' + e.message); }
+    return ra;   // giữ nguyên → luồng mock kênh kinh doanh không bị đụng
+  }
+
+  /* Thực thi lời gọi tool MCP khi CEO đã duyệt → kết quả thật + bằng chứng chảy ngược */
+  async runMcpAction(ap, task, action) {
+    this.setAgent('coo', 'work', `Đang gọi công cụ thật qua MCP: ${action.tool}…`);
+    try {
+      const r = await mcp.callTool(action.serverId, action.tool, action.params || {});
+      const resText = (r.text || '(không có nội dung trả về)').slice(0, 1500);
+      mcp.logAction({ missionId: ap.mission_id, taskId: task.id, serverId: action.serverId, tool: action.tool, params: action.params, resultText: resText, isError: r.isError });
+      this.taskEvent(task.id, 'coo', 'real_action', { approvalId: ap.id, action, executed: true, mode: 'mcp', isError: !!r.isError });
+      this.chat('coo', `🏢 <b>Đã thực hiện THẬT qua MCP</b> — gọi <code>${esc(action.tool)}</code> trên "${esc(mcp.serverName(action.serverId))}".<br>Kết quả: <i>${esc(resText)}</i>`, ap.mission_id);
+      this.emit('toast', { title: r.isError ? '⚠️ MCP trả lỗi' : '✅ Đã thực hiện THẬT qua MCP', body: action.tool, cls: r.isError ? 'red' : '' });
+      this.emit('mcp.result', {});
+      // bằng chứng kết quả vào Bộ não thứ 2
+      try { secondbrain.capture({ title: 'Kết quả thật: ' + task.title, body: `Thực hiện qua MCP — công cụ \`${action.tool}\` trên "${mcp.serverName(action.serverId)}".\n\n**Kết quả:**\n${resText}`, tags: ['ket-qua', 'mcp'], type: 'insight', source: 'mcp:' + task.id, entities: [] }); } catch {}
+      return !r.isError;
+    } catch (e) {
+      const msg = String((e && e.message) || e).slice(0, 200);
+      mcp.logAction({ missionId: ap.mission_id, taskId: task.id, serverId: action.serverId, tool: action.tool, params: action.params, resultText: 'LỖI: ' + msg, isError: true });
+      this.chat('coo', `⚠️ Gọi MCP thất bại: <i>${esc(msg)}</i>. Hành động chưa thực hiện — sếp kiểm tra kết nối trong 🔌 Kết nối.`, ap.mission_id);
+      this.emit('toast', { title: '⚠️ MCP thất bại', body: msg.slice(0, 60), cls: 'red' });
+      return false;
+    }
   }
 
   /* ============ COO CHỦ ĐỘNG — SÁNG KIẾN (Phase 3) ============ */

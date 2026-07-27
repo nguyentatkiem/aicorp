@@ -273,7 +273,7 @@ app.post('/api/brain2/reindex', sameOrigin, (req, res) => {
 
 /* ---------------- MCP GATEWAY — KẾT NỐI DOANH NGHIỆP ---------------- */
 app.get('/api/mcp', (req, res) => {
-  res.json({ servers: mcp.listServers(), catalog: mcp.CATALOG, toolCount: mcp.toolCount() });
+  res.json({ servers: mcp.listServers(), catalog: mcp.CATALOG, toolCount: mcp.toolCount(), actions: mcp.recentActions(20) });
 });
 app.post('/api/mcp/servers', sameOrigin, (req, res) => {
   try {
