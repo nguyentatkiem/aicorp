@@ -83,6 +83,18 @@ const check = (name, cond, detail) => { console.log(`${cond ? '✅' : '❌'} UI:
   await page.click('#b2mode'); // quay lại note (dừng rAF)
   await new Promise(r => setTimeout(r, 400));
 
+  /* MCP Gateway: màn Kết nối có khối MCP + mở form thêm kết nối */
+  await page.click('[data-screen="connect"]');
+  await new Promise(r => setTimeout(r, 900));
+  const mcpList = await page.$('#mcplist');
+  const mcpAdd = await page.$('#mcpadd');
+  check('Kết nối doanh nghiệp (MCP): khối render', !!mcpList && !!mcpAdd);
+  await page.click('#mcpadd');
+  await new Promise(r => setTimeout(r, 400));
+  const formShown = await page.$eval('#mcpform', el => el.style.display !== 'none').catch(() => false);
+  const catSel = await page.$('#mcp_cat');
+  check('MCP: form thêm kết nối + danh mục hiện ra', formShown && !!catSel);
+
   /* War Room + timeline */
   await page.click('[data-screen="home"]');
   await new Promise(r => setTimeout(r, 800));

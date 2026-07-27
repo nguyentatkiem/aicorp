@@ -25,6 +25,16 @@ Lần đầu mở sẽ vào **khảo sát DNA 7 bước** (~5 phút). Bấm "✨
 
 Gói Sub dùng OAuth: SDK gửi `Authorization: Bearer <token>` + header `anthropic-beta: oauth-2025-04-20`. Token lấy từ lệnh `claude setup-token` (cần đã cài Claude Code hoặc CLI Anthropic và có gói Pro/Max).
 
+## Kết nối doanh nghiệp qua MCP — tạo kết quả thật (v7, 🏢)
+
+Nâng AICORP từ "mô phỏng" thành **tầng điều hành AI đặt lên phần mềm thật** của bạn, qua giao thức **MCP (Model Context Protocol)**:
+
+- **MCP Gateway** (`server/mcp.js`): AICORP làm **client** của mọi MCP server — stdio (lệnh cục bộ) hoặc SSE/HTTP (URL) — qua `@modelcontextprotocol/sdk`. Đăng ký nhiều kết nối, **tự khám phá công cụ**, gán **"túi công cụ" theo phòng ban** (Marketing→Canva/Meta; Kinh doanh→CRM/sàn; CSKH→Zalo/Email; Tài chính→kế toán).
+- **Danh mục gợi ý** điền sẵn cấu hình: Filesystem, Memory, GitHub, Slack, PostgreSQL, n8n (cầu tới 400+ app: Zalo/Shopee/TikTok Shop…). Hoặc nhập lệnh MCP tùy ý.
+- **Bí mật cất trên máy bạn** ở `~/AICORP/secret/mcp/<id>.json` (quyền 600) — không vào DB/API/backup. Mọi route đổi trạng thái qua `sameOrigin`.
+- Màn **🔌 Kết nối** → khối "Kết nối doanh nghiệp (MCP)": thêm/kết nối/gán phòng/xoá. Test: `npm run test:mcp` (nối MCP server thật, khám phá + gọi tool thật).
+- Đây là **Pha A** (nền tảng Gateway). Pha B: Cổng phê duyệt gọi thẳng công cụ MCP thật (gửi email/đăng bài/tạo đơn) rồi **kết quả thật chảy ngược** vào CRM/buồng lái/bộ não.
+
 ## Bộ não thứ 2 — tri thức liên kết kiểu Obsidian (v6, 🕸️)
 
 Nâng "trí nhớ phẳng" thành **mạng tri thức sống** để hệ thống chạy hiệu quả hơn theo thời gian:

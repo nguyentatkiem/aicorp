@@ -12,6 +12,7 @@
     "test:v4": "node scripts/test-v4.js",
     "test:sub": "node scripts/test-sub.js",
     "test:brain2": "node scripts/test-brain2.js",
+    "test:mcp": "node scripts/test-mcp.js",
     "test:audit": "node scripts/test-audit-fixes.js",
     "test:ui": "node scripts/ui-smoke.js"
   },
@@ -20,6 +21,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "adm-zip": "^0.6.0",
     "better-sqlite3": "^11.8.0",
     "docx": "^9.1.0",

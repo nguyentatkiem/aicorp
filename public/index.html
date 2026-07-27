@@ -217,8 +217,16 @@
           <h3>⚡ Engine — nguồn sức mạnh của công ty</h3>
           <div id="enginecards" class="grid2"></div>
         </div>
+        <div class="card">
+          <h3>🏢 Kết nối doanh nghiệp (MCP) <span class="ftag" id="mcptoolcount" style="background:var(--panel3);color:var(--muted);font-weight:500"></span>
+            <button class="btn" id="mcpadd" style="margin-left:auto;padding:5px 13px">＋ Thêm kết nối</button>
+          </h3>
+          <div class="psub" style="margin:-4px 0 10px">Nối AICORP tới phần mềm thật qua giao thức MCP (Gmail, Drive, Slack, CSDL, n8n→Zalo/Shopee/TikTok Shop…). Agent dùng các công cụ này để tạo <b>kết quả thật</b>. Mọi khoá/token lưu trên máy bạn (quyền 600), không lộ ra ngoài.</div>
+          <div id="mcpform" style="display:none;background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:14px;margin-bottom:12px"></div>
+          <div id="mcplist"></div>
+        </div>
         <div class="grid2">
-          <div class="card"><h3>🔗 Kết nối MCP &amp; n8n</h3><div id="connlist"></div></div>
+          <div class="card"><h3>🔗 Kết nối n8n (webhook)</h3><div id="connlist"></div></div>
           <div class="card"><h3>🧩 Thư viện Skill
             <label class="btn ghost" style="margin-left:auto;padding:5px 12px;cursor:pointer">＋ Cài skill (.zip)<input type="file" id="skillzip" accept=".zip" style="display:none"></label>
           </h3><div id="skilllist"></div></div>

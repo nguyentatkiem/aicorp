@@ -14,6 +14,7 @@ Chào bạn! Đây là cẩm nang dùng AICORP — viết cho người **không 
 8. 👥 [Quản trị nhân sự AI](#8-👥-quản-trị-nhân-sự-ai)
 9. 🧠 [Company Brain — bộ não công ty](#9-🧠-company-brain--bộ-não-công-ty)
 9b. 🕸️ [Bộ não thứ 2 — mạng tri thức kiểu Obsidian](#9b-🕸️-bộ-não-thứ-2--mạng-tri-thức-kiểu-obsidian)
+9c. 🏢 [Kết nối doanh nghiệp (MCP) — nối phần mềm thật](#9c-🏢-kết-nối-doanh-nghiệp-mcp--nối-phần-mềm-thật)
 10. 🚀 [Tính năng nâng cao](#10-🚀-tính-năng-nâng-cao)
 11. ❓ [Câu hỏi thường gặp](#11-❓-câu-hỏi-thường-gặp)
 
@@ -236,6 +237,20 @@ Bấm biểu tượng 🕸️. Nếu Company Brain (🧠) là "kho hồ sơ", th
 - **Công ty tự ghi bài học.** Xong mỗi nhiệm vụ, COO tự tạo một ghi chú "Bài học" và **tự nối** nó với sản phẩm/phòng ban liên quan. Trước khi làm việc mới, nhân viên AI đọc lại đúng những ghi chú liên quan — nên làm càng lâu càng "lành nghề".
 - **Tự viết thêm.** Bấm **＋ Ghi chú mới**, gõ nội dung (hỗ trợ markdown), gõ `[[` rồi tên một ghi chú khác để tạo liên kết. Muốn gợi ý nên nối gì với gì, bấm **🔗 Gợi ý nối**.
 - **Mở được bằng Obsidian thật.** Mọi ghi chú là file `.md` trong thư mục `AICORP/workspace/brain/notes/`. Bạn có thể mở thư mục đó bằng app Obsidian để xem/sửa; sửa xong quay lại AICORP bấm **🔄 Nạp lại** là đồng bộ.
+
+---
+
+## 9c. 🏢 Kết nối doanh nghiệp (MCP) — nối phần mềm thật
+
+Đây là bước để công ty AI **làm việc thật với phần mềm bạn đang dùng**, không chỉ mô phỏng. Vào **🔌 Kết nối** → khối **"Kết nối doanh nghiệp (MCP)"**.
+
+- **MCP là gì (nói đơn giản):** một "ổ cắm chuẩn" để AI kết nối tới các phần mềm khác — Gmail, Google Drive, Slack, cơ sở dữ liệu, và qua **n8n** thì tới cả Zalo OA, Shopee, TikTok Shop, phần mềm kế toán…
+- **Thêm kết nối:** bấm **＋ Thêm kết nối** → chọn trong **danh mục gợi ý** (đã điền sẵn cấu hình) hoặc "Tùy chỉnh" để nhập lệnh. Nếu kết nối cần chìa khoá (token), dán vào ô khoá — **khoá chỉ lưu trên máy bạn** (file quyền 600), không gửi đi đâu.
+- **Gán công cụ cho phòng:** mỗi kết nối có nhiều "công cụ". Bấm các chip **phòng** (MKT, KD, CSKH…) để cho phòng đó được dùng bộ công cụ này — như phát "đồ nghề" cho nhân viên.
+- **Trạng thái:** 🟢 đã nối · 🔴 lỗi (xem thông báo) · ⚪ chưa nối. Bấm **🔄 Nối lại** nếu cần.
+- **An toàn:** mọi hành động ra thế giới thật vẫn phải qua 🔔 Hộp phê duyệt. Nếu bạn phơi app ra internet (Cloudflare Tunnel), hãy đặt mật khẩu — vì cấu hình kết nối MCP là quyền mạnh.
+
+> Hiện tại là **Pha A** (nền tảng kết nối). Bước tiếp theo: nhân viên AI sẽ tự dùng các công cụ này để **gửi email thật, đăng bài thật, tạo đơn thật** — và kết quả (mã đơn, link bài…) chảy ngược vào buồng lái & CRM.
 
 ---
 

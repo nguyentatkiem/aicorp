@@ -12,6 +12,7 @@ const { Orchestrator } = require('./orchestrator');
 const { ICONS } = require('./artifacts');
 const secondbrain = require('./secondbrain');
 const noteContent = require('./demo/note-content');
+const mcp = require('./mcp');
 const AdmZip = require('adm-zip');
 
 seed();
@@ -268,6 +269,50 @@ app.delete('/api/brain2/notes/:slug', sameOrigin, (req, res) => {
 app.post('/api/brain2/reindex', sameOrigin, (req, res) => {
   try { res.json({ ok: true, count: secondbrain.reindexFromDisk() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ---------------- MCP GATEWAY — KẾT NỐI DOANH NGHIỆP ---------------- */
+app.get('/api/mcp', (req, res) => {
+  res.json({ servers: mcp.listServers(), catalog: mcp.CATALOG, toolCount: mcp.toolCount() });
+});
+app.post('/api/mcp/servers', sameOrigin, (req, res) => {
+  try {
+    const id = mcp.addServer({ name: req.body.name, transport: req.body.transport, command: req.body.command, args: req.body.args, url: req.body.url, env: req.body.env });
+    // thử kết nối ngay (không chặn phản hồi lâu — trả id, client tự làm mới)
+    mcp.connectServer(id).then(() => orch.emit('mcp.update', {})).catch(() => {});
+    res.json({ ok: true, id });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+const badId = (v, res) => { if (!mcp.validId(v)) { res.status(400).json({ error: 'id kết nối không hợp lệ' }); return true; } return false; };
+app.post('/api/mcp/servers/:id/connect', sameOrigin, async (req, res) => {
+  if (badId(req.params.id, res)) return;
+  try { const r = await mcp.connectServer(req.params.id); orch.emit('mcp.update', {}); res.json(r); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mcp/servers/:id/toggle', sameOrigin, async (req, res) => {
+  if (badId(req.params.id, res)) return;
+  try { res.json(await mcp.toggleServer(req.params.id)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mcp/servers/:id/secrets', sameOrigin, (req, res) => {
+  if (badId(req.params.id, res)) return;
+  try { mcp.setSecrets(req.params.id, req.body.env || {}); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/mcp/servers/:id', sameOrigin, async (req, res) => {
+  if (badId(req.params.id, res)) return;
+  try { res.json({ ok: await mcp.removeServer(req.params.id) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mcp/assign', sameOrigin, (req, res) => {
+  if (badId(req.body.serverId, res)) return;
+  try { res.json({ ok: mcp.assign(req.body.serverId, req.body.tool, req.body.deptId, !!req.body.on) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/mcp/call', sameOrigin, async (req, res) => {
+  if (badId(req.body.serverId, res)) return;
+  try { res.json({ ok: true, result: await mcp.callTool(req.body.serverId, req.body.tool, req.body.args || {}) }); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 /* Làm sạch tên file người dùng tải lên — chống path traversal */
 function safeFilename(name) {
@@ -669,12 +714,19 @@ io.on('connection', socket => {
   socket.emit('hello', { at: now() });
 });
 
+/* Tắt sạch: đóng mọi tiến trình con MCP khi thoát (tránh bỏ rơi zombie mỗi lần restart) */
+let _shuttingDown = false;
+async function shutdown() { if (_shuttingDown) return; _shuttingDown = true; try { await mcp.closeAll(); } catch {} process.exit(0); }
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
 const PORT = process.env.PORT || 3939;
 /* Chỉ bind localhost — dữ liệu công ty không lộ ra mạng LAN (bảo mật) */
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  🏢 AICORP đang chạy tại  http://localhost:${PORT}\n  📂 Dữ liệu: ${DIRS.root}\n`);
   log('server started');
   orch.resume();
+  mcp.bootConnect();   // kết nối lại các MCP server đã bật (không chặn khởi động)
   if (process.platform === 'darwin' && !process.env.AICORP_NO_OPEN) {
     require('child_process').exec(`open http://localhost:${PORT}`);
   }

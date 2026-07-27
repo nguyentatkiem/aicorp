@@ -521,7 +521,116 @@ async function refreshConnect() {
   $('#skilllist').innerHTML = skills.map(s => `
    <div class="setrow"><div class="sl"><b>🧩 ${esc(s.name)}</b><span>Gắn cho: ${(s.assigned || []).join(', ') || '—'} · ${esc(s.description || '')}</span></div>
    <div class="toggle ${s.enabled ? 'on' : ''}" onclick="toggleSkill('${s.id}',this)"></div></div>`).join('');
+  refreshMCP();
 }
+
+/* ================= MCP GATEWAY — KẾT NỐI DOANH NGHIỆP ================= */
+let MCP_CATALOG = [];
+const MCP_DEPTS = [['mkt', 'MKT'], ['kd', 'KD'], ['tckt', 'TC'], ['ns', 'NS'], ['cskh', 'CSKH'], ['vh', 'VH'], ['data', 'DATA']];
+const mcpStatusIcon = s => s === 'connected' ? '🟢' : s === 'error' ? '🔴' : '⚪';
+
+async function refreshMCP() {
+  const d = await api('/mcp');
+  MCP_CATALOG = d.catalog || [];
+  $('#mcptoolcount').textContent = `${d.servers.length} kết nối · ${d.toolCount} công cụ`;
+  const list = $('#mcplist');
+  if (!d.servers.length) { list.innerHTML = `<div class="psub">Chưa có kết nối nào. Bấm <b>＋ Thêm kết nối</b> — chọn từ danh mục gợi ý (Filesystem, Slack, GitHub, n8n…) hoặc nhập lệnh MCP tùy ý.</div>`; return; }
+  list.innerHTML = d.servers.map(sv => {
+    const assignedDepts = new Set((sv.assignments || []).map(a => a.dept_id));
+    const chips = MCP_DEPTS.map(([id, lb]) => `<span class="b2tag" style="cursor:pointer;${assignedDepts.has(id) ? 'background:rgba(49,201,126,.16);color:var(--jade)' : ''}" onclick="mcpAssignDept('${sv.id}','${id}',${assignedDepts.has(id) ? 0 : 1})">${lb}</span>`).join('');
+    const toolNames = sv.tools.slice(0, 12).map(t => `<span title="${escAttr(t.description || '')}" class="b2typchip" style="margin:2px 3px 0 0">${esc(t.name)}</span>`).join('') + (sv.tools.length > 12 ? ` <span class="psub">+${sv.tools.length - 12}</span>` : '');
+    return `<div style="border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:9px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <b>${mcpStatusIcon(sv.status)} ${esc(sv.name)}</b>
+        <span class="psub">${esc(sv.transport)} · ${sv.status === 'connected' ? '<span style="color:var(--jade)">đã nối · ' + sv.tools.length + ' công cụ</span>' : esc(sv.status)}${sv.hasSecrets ? ' · 🔑 có khoá' : ''}</span>
+        <span style="margin-left:auto;display:flex;gap:6px">
+          <button class="btn ghost" style="padding:3px 9px;font-size:11px" onclick="mcpConnect('${sv.id}')">🔄 Nối lại</button>
+          <div class="toggle ${sv.enabled ? 'on' : ''}" onclick="mcpToggle('${sv.id}',this)"></div>
+          <button class="btn ghost" style="padding:3px 9px;font-size:11px" onclick="mcpRemove('${sv.id}','${escAttr(sv.name)}')">🗑</button>
+        </span>
+      </div>
+      ${sv.error ? `<div style="color:var(--red);font-size:11.5px;margin-top:5px">⚠️ ${esc(sv.error)}</div>` : ''}
+      ${sv.tools.length ? `<div style="margin-top:8px"><span class="psub">Công cụ: </span>${toolNames}</div>
+      <div style="margin-top:7px"><span class="psub">Phòng được dùng: </span>${chips}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+window.mcpAssignDept = async (serverId, deptId, on) => {
+  const d = await api('/mcp');
+  const sv = d.servers.find(s => s.id === serverId);
+  if (!sv || !sv.tools.length) { toast('⚠️', 'Kết nối chưa có công cụ (nối lại trước)', 'red'); return; }
+  for (const t of sv.tools) await post('/mcp/assign', { serverId, tool: t.name, deptId, on: !!on });
+  toast(on ? '🔧 Đã gán bộ công cụ' : '↩️ Đã gỡ', `${sv.name} ${on ? '→' : '⇏'} phòng ${deptId.toUpperCase()}`);
+  refreshMCP();
+};
+window.mcpConnect = async id => { toast('🔄 Đang kết nối…', ''); const r = await post(`/mcp/servers/${id}/connect`, {}); toast(r.ok ? '🟢 Đã kết nối' : '🔴 Lỗi kết nối', r.ok ? `${r.tools.length} công cụ` : (r.error || '').slice(0, 80), r.ok ? '' : 'red'); refreshMCP(); };
+window.mcpToggle = async (id, elx) => { const r = await post(`/mcp/servers/${id}/toggle`, {}); elx.classList.toggle('on', !!r.enabled); refreshMCP(); };
+window.mcpRemove = async (id, name) => { if (!confirm(`Xoá kết nối "${name}"? Khoá/token của nó cũng bị xoá.`)) return; await api('/mcp/servers/' + id, { method: 'DELETE' }); toast('🗑 Đã xoá kết nối', name); refreshMCP(); };
+
+function mcpOpenAdd() {
+  const f = $('#mcpform');
+  if (f.style.display !== 'none') { f.style.display = 'none'; return; }
+  f.style.display = '';
+  const opts = ['<option value="">— Chọn từ danh mục gợi ý —</option>', ...MCP_CATALOG.map((c, i) => `<option value="${i}">${esc(c.name)}${c.secret ? ' 🔑' : ''}</option>`), '<option value="custom">⚙️ Tùy chỉnh (nhập lệnh MCP)</option>'].join('');
+  f.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:9px">
+      <b style="font-size:13px">Thêm kết nối MCP</b>
+      <select class="sel" id="mcp_cat" style="min-width:220px">${opts}</select>
+    </div>
+    <div id="mcp_fields"></div>`;
+  $('#mcp_cat').onchange = mcpCatPick;
+}
+function mcpCatPick() {
+  const v = $('#mcp_cat').value;
+  const box = $('#mcp_fields');
+  if (v === '') { box.innerHTML = ''; return; }
+  let c = v === 'custom' ? { name: '', transport: 'stdio', command: 'npx', args: [], env: {}, note: 'Nhập lệnh chạy MCP server (stdio) hoặc URL (SSE/HTTP).' } : MCP_CATALOG[+v];
+  const isStdio = c.transport !== 'sse' && c.transport !== 'http';
+  const envKeys = Object.keys(c.env || {});
+  box.innerHTML = `
+    <div class="psub" style="margin-bottom:8px">${esc(c.note || '')}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div><label class="psub">Tên</label><input class="inp" id="mcp_name" value="${escAttr(c.name || '')}" placeholder="Tên kết nối"></div>
+      <div><label class="psub">Kiểu</label><select class="sel" id="mcp_transport">
+        <option value="stdio" ${isStdio ? 'selected' : ''}>stdio (lệnh cục bộ)</option>
+        <option value="sse" ${c.transport === 'sse' ? 'selected' : ''}>SSE (URL)</option>
+        <option value="http" ${c.transport === 'http' ? 'selected' : ''}>HTTP (URL)</option></select></div>
+    </div>
+    <div id="mcp_stdio" style="display:${isStdio ? 'block' : 'none'};margin-bottom:8px">
+      <label class="psub">Lệnh + tham số (mỗi dòng một mục)</label>
+      <textarea class="inp" id="mcp_cmd" rows="4" style="font-family:'JetBrains Mono',monospace;font-size:12px">${esc([c.command || 'npx', ...(c.args || [])].join('\n'))}</textarea>
+    </div>
+    <div id="mcp_url" style="display:${isStdio ? 'none' : 'block'};margin-bottom:8px">
+      <label class="psub">URL server</label><input class="inp" id="mcp_urlv" value="${escAttr(c.url || '')}" placeholder="http://localhost:5678/mcp/…/sse">
+    </div>
+    ${envKeys.length ? `<div style="margin-bottom:8px"><label class="psub">Khoá bí mật (lưu quyền 600 trên máy bạn)</label>
+      ${envKeys.map(k => `<input class="inp mcp_env" data-k="${escAttr(k)}" type="password" placeholder="${escAttr(k)}" style="margin-top:5px" value="">`).join('')}</div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn" onclick="mcpSubmit()">＋ Thêm & kết nối</button>
+      <button class="btn ghost" onclick="document.getElementById('mcpform').style.display='none'">Huỷ</button>
+    </div>`;
+  $('#mcp_transport').onchange = () => { const s = $('#mcp_transport').value === 'stdio'; $('#mcp_stdio').style.display = s ? 'block' : 'none'; $('#mcp_url').style.display = s ? 'none' : 'block'; };
+}
+window.mcpSubmit = async () => {
+  const transport = $('#mcp_transport').value;
+  const body = { name: $('#mcp_name').value.trim() || 'MCP', transport, env: {} };
+  document.querySelectorAll('.mcp_env').forEach(i => { if (i.value.trim()) body.env[i.dataset.k] = i.value.trim(); });
+  if (transport === 'stdio') {
+    const lines = $('#mcp_cmd').value.split('\n').map(x => x.trim()).filter(Boolean);
+    if (!lines.length) { toast('⚠️ Thiếu lệnh', 'Nhập lệnh chạy MCP server', 'red'); return; }
+    body.command = lines[0]; body.args = lines.slice(1);
+  } else {
+    body.url = $('#mcp_urlv').value.trim();
+    if (!body.url) { toast('⚠️ Thiếu URL', '', 'red'); return; }
+  }
+  toast('🔄 Đang thêm & kết nối…', body.name);
+  const r = await post('/mcp/servers', body);
+  if (!r.ok) { toast('⚠️ Lỗi', r.error || '', 'red'); return; }
+  $('#mcpform').style.display = 'none';
+  setTimeout(refreshMCP, 1500); setTimeout(refreshMCP, 5000);   // chờ khám phá tool
+  refreshMCP();
+};
 window.setEngine = async k => {
   if (k === 'sub' && !STATE.engine.hasSubToken) { const s = await api('/settings'); if (!s.hasSubToken) { toast('🎫 Cần đăng nhập gói Sub', 'Chạy `claude setup-token` rồi dán token vào thẻ Gói Sub', 'red'); return; } }
   await post('/settings', { engine_kind: k }); STATE.engine.kind = k; $('#enginename').textContent = engineLabel(k);
@@ -676,6 +785,7 @@ function connectSocket() {
   socket.on('initiative.update', () => { refreshInitiativeBadge(); if ($('#screen-initiatives').classList.contains('active')) refreshInitiatives(); });
   socket.on('crm.update', () => { refreshCRMBadge(); if ($('#screen-crm').classList.contains('active')) debounce('crm', refreshCRM, 500); if ($('#screen-cockpit').classList.contains('active')) debounce('cockpit', refreshCockpit, 600); });
   socket.on('playbook.new', () => { if ($('#screen-hr').classList.contains('active')) refreshPlaybooks(); });
+  socket.on('mcp.update', () => { if ($('#screen-connect').classList.contains('active')) refreshMCP(); });
   socket.on('brain2.new', () => { if ($('#screen-brain2').classList.contains('active')) debounce('b2', () => refreshBrain2(true), 600); });
 }
 const debTimers = {};
@@ -1193,6 +1303,7 @@ function bindUI() {
   $('#b2mode').onclick = b2ToggleGraph;
   $('#b2suggest').onclick = b2ShowSuggest;
   $('#b2reindex').onclick = b2Reindex;
+  $('#mcpadd').onclick = mcpOpenAdd;
   $('#b2search').addEventListener('input', () => debounce('b2search', () => refreshBrain2(true), 260));
   // click wikilink / backlink (uỷ quyền sự kiện toàn màn brain2)
   $('#screen-brain2').addEventListener('click', e => {
@@ -1206,7 +1317,7 @@ function bindUI() {
 let B2 = { cur: null, notes: [], mode: 'note', graph: null, raf: 0 };
 const B2COLORS = { concept: '#31C97E', decision: '#F6A821', playbook: '#8F7CF6', insight: '#41B7F0', competitor: '#E5484D', sop: '#93A0BC', retro: '#8F7CF6', customer: '#41B7F0', phantom: '#5E6B8C' };
 const B2TYPE = { concept: 'Khái niệm', decision: 'Quyết định', playbook: 'Playbook', insight: 'Insight', competitor: 'Đối thủ', sop: 'Quy trình', retro: 'Bài học', customer: 'Khách hàng' };
-const escAttr = s => esc(s).replace(/"/g, '&quot;');
+const escAttr = s => esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const slugifyClient = t => (String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)) || 'note';
 function b2StopGraph() { if (B2.raf) cancelAnimationFrame(B2.raf); B2.raf = 0; if (B2._moveHandler) { window.removeEventListener('mousemove', B2._moveHandler); B2._moveHandler = null; } }
 
